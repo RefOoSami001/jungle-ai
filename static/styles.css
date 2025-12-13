@@ -26,8 +26,8 @@ body{
 
 .container{max-width:680px;margin:28px auto;padding:20px;padding-bottom:100px}
 
-.topbar{display:flex;align-items:center;justify-content:flex-start;margin-bottom:18px}
-.brand{display:flex;align-items:center;gap:12px}
+.topbar{display:flex;align-items:center;justify-content:flex-start;margin-bottom:18px;gap:12px}
+.brand{display:flex;align-items:center;gap:12px;flex:1}
 .logo{width:38px;height:38px;border-radius:6px;background:linear-gradient(135deg,var(--accent),var(--accent-2));display:flex;align-items:center;justify-content:center;font-weight:700;color:white}
 
 .card{backdrop-filter: blur(8px);background:var(--card-bg);border:1px solid rgba(111,76,255,0.08);padding:18px;border-radius:8px;box-shadow:0 8px 24px rgba(15,23,42,0.06)}
@@ -60,15 +60,80 @@ label.small{display:block;font-size:14px;color:var(--muted);margin-bottom:8px;fo
 .card-quiz .q{font-weight:700;margin-bottom:8px;font-size:18px}
 .badge{display:inline-block;padding:6px 8px;border-radius:6px;background:rgba(16,24,40,0.03);color:var(--muted);font-size:12px;margin-bottom:8px}
 .options{display:flex;flex-direction:column;gap:8px;margin-top:8px}
-.option{display:block}
+.option{display:block;cursor:pointer}
 .option input{display:none}
-.option-inner{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px;border-radius:10px;background:rgba(16,24,40,0.02);border:1px solid rgba(16,24,40,0.03);transition:all .12s}
-.option-inner{transition:background .2s ease, border-color .15s ease, transform .08s ease}
-.option-text{font-size:15px;color:var(--black);line-height:1.35}
+.option-inner{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  padding:12px;
+  border-radius:10px;
+  background:rgba(16,24,40,0.02);
+  border:1px solid rgba(16,24,40,0.03);
+  transition:all .25s cubic-bezier(0.4, 0, 0.2, 1);
+  position:relative;
+}
+.option:hover .option-inner{
+  background:rgba(16,24,40,0.04);
+  border-color:rgba(16,24,40,0.08);
+  transform:translateX(2px);
+}
+.option-text{font-size:15px;color:var(--black);line-height:1.35;transition:color .2s ease, font-weight .2s ease;flex:1}
+.option-icon{
+  width:20px;
+  height:20px;
+  border-radius:50%;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  flex-shrink:0;
+  opacity:0;
+  transform:scale(0);
+  transition:all .3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  position:absolute;
+  right:12px;
+  top:50%;
+  transform:translateY(-50%) scale(0);
+}
+.option-icon svg{
+  width:14px;
+  height:14px;
+}
+.option-icon.check-icon{
+  background:rgba(34,197,94,0.15);
+  color:#22c55e;
+}
+.option-icon.x-icon{
+  background:rgba(248,2,2,0.15);
+  color:#f80202;
+}
+.option-inner.correct .option-icon.check-icon,
+.option-inner.incorrect .option-icon.x-icon{
+  opacity:1;
+  transform:translateY(-50%) scale(1);
+}
 .option .check{display:none;font-size:14px}
 /* checked state: input (hidden) immediately followed by .option-inner */
-.option input:checked + .option-inner{background:linear-gradient(90deg, rgba(124,92,255,0.12), rgba(111,76,255,0.06));border-color:transparent}
-.option input:checked + .option-inner .option-text{color:var(--black);font-weight:600}
+.option input:checked + .option-inner{
+  background:linear-gradient(90deg, rgba(124,92,255,0.12), rgba(111,76,255,0.06));
+  border-color:transparent;
+  transform:scale(1.02);
+  box-shadow:0 4px 12px rgba(111,76,255,0.15);
+}
+.option input:checked + .option-inner .option-text{
+  color:var(--black);
+  font-weight:600;
+}
+/* animation classes */
+.option-inner.animating{
+  animation:optionPulse 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+@keyframes optionPulse{
+  0%{transform:scale(1)}
+  50%{transform:scale(1.05)}
+  100%{transform:scale(1)}
+}
 .reveal{margin-top:10px;background:transparent;border:0;color:var(--accent);cursor:pointer;font-weight:700}
 .answer{margin-top:8px;padding:8px;border-radius:6px;background:rgba(16,24,40,0.02);border-left:3px solid var(--accent);display:none}
 
@@ -89,12 +154,86 @@ label.small{display:block;font-size:14px;color:var(--muted);margin-bottom:8px;fo
 #next{width:100%;padding:12px;border-radius:12px}
 
 /* explicit styles for check results */
-.option-inner.correct{background:linear-gradient(90deg, rgba(34,197,94,0.12), rgba(34,197,94,0.04));border-color:transparent}
-.option-inner.incorrect{background:linear-gradient(90deg, rgba(248, 2, 2, 0.1), rgba(255,99,99,0.04));border-color:transparent}
+.option-inner.correct{
+  background:linear-gradient(90deg, rgba(34,197,94,0.12), rgba(34,197,94,0.04));
+  border-color:rgba(34,197,94,0.2);
+  animation:correctReveal 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+  box-shadow:0 4px 12px rgba(34,197,94,0.15);
+}
+.option-inner.incorrect{
+  background:linear-gradient(90deg, rgba(248, 2, 2, 0.1), rgba(255,99,99,0.04));
+  border-color:rgba(248,2,2,0.2);
+  animation:incorrectReveal 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+  box-shadow:0 4px 12px rgba(248,2,2,0.1);
+}
+.option-inner.correct .option-icon.check-icon,
+.option-inner.incorrect .option-icon.x-icon{
+  opacity:1;
+  transform:translateY(-50%) scale(1);
+  animation:iconBounce 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) 0.2s both;
+}
+/* Hide the opposite icon when one is shown */
+.option-inner.correct .option-icon.x-icon,
+.option-inner.incorrect .option-icon.check-icon{
+  display:none;
+}
 
 /* when input is checked but the option has been marked correct/incorrect, ensure green/red overrides the default checked purple */
-.option input:checked + .option-inner.correct{background:linear-gradient(90deg, rgba(34,197,94,0.16), rgba(34,197,94,0.06));border-color:transparent}
-.option input:checked + .option-inner.incorrect{background:linear-gradient(90deg, rgba(248,2,2,0.14), rgba(255,99,99,0.06));border-color:transparent}
+.option input:checked + .option-inner.correct{
+  background:linear-gradient(90deg, rgba(34,197,94,0.16), rgba(34,197,94,0.06));
+  border-color:rgba(34,197,94,0.3);
+  transform:scale(1.02);
+}
+.option input:checked + .option-inner.incorrect{
+  background:linear-gradient(90deg, rgba(248,2,2,0.14), rgba(255,99,99,0.06));
+  border-color:rgba(248,2,2,0.3);
+  transform:scale(1.02);
+}
+
+/* animations */
+@keyframes correctReveal{
+  0%{
+    transform:scale(1);
+    background:rgba(16,24,40,0.02);
+  }
+  50%{
+    transform:scale(1.03);
+  }
+  100%{
+    transform:scale(1);
+  }
+}
+@keyframes incorrectReveal{
+  0%{
+    transform:scale(1);
+    background:rgba(16,24,40,0.02);
+  }
+  25%{
+    transform:translateX(-3px) scale(1.02);
+  }
+  50%{
+    transform:translateX(3px) scale(1.02);
+  }
+  75%{
+    transform:translateX(-2px) scale(1.01);
+  }
+  100%{
+    transform:translateX(0) scale(1);
+  }
+}
+@keyframes iconBounce{
+  0%{
+    opacity:0;
+    transform:translateY(-50%) scale(0) rotate(-180deg);
+  }
+  60%{
+    transform:translateY(-50%) scale(1.2) rotate(10deg);
+  }
+  100%{
+    opacity:1;
+    transform:translateY(-50%) scale(1) rotate(0deg);
+  }
+}
 
 /* answer reveal (understanding) */
 .answer{transition:filter .22s ease, opacity .18s ease}
@@ -153,4 +292,40 @@ label.small{display:block;font-size:14px;color:var(--muted);margin-bottom:8px;fo
 @keyframes pulse{
   0%, 100%{transform:scale(1);}
   50%{transform:scale(1.1);}
+}
+
+/* file upload area */
+.file-upload-area{
+  border:2px dashed rgba(16,24,40,0.1);
+  border-radius:8px;
+  padding:32px 20px;
+  text-align:center;
+  background:rgba(16,24,40,0.01);
+  transition:all .2s ease;
+  cursor:pointer;
+  margin-bottom:12px;
+}
+.file-upload-area:hover{
+  border-color:var(--accent);
+  background:rgba(111,76,255,0.02);
+}
+.file-upload-area.drag-over{
+  border-color:var(--accent);
+  background:rgba(111,76,255,0.05);
+  transform:scale(1.02);
+}
+.file-upload-content{
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+}
+.file-selected-content{
+  display:flex;
+  align-items:center;
+  gap:12px;
+  text-align:left;
+}
+.file-selected-content .btn{
+  margin:0;
 }
