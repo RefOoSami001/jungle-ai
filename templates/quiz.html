@@ -17,6 +17,16 @@
       </div>
       <div id="deck-id" style="display:none">{{ deck_id }}</div>
 
+      <div class="card" style="margin-bottom:12px;padding:12px;background:rgba(111,76,255,0.05);border:1px solid rgba(111,76,255,0.1)">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+          <div>
+            <div style="font-size:12px;color:var(--muted);margin-bottom:4px">Quiz ID (Share this to let others access this quiz):</div>
+            <div id="quiz-id-display" style="font-family:monospace;font-size:16px;font-weight:600;color:var(--accent);word-break:break-all">{{ deck_id }}</div>
+          </div>
+          <button id="copy-quiz-id-btn" class="btn ghost" style="flex-shrink:0;padding:8px 16px;font-size:14px">Copy ID</button>
+        </div>
+      </div>
+
       <div id="loading-indicator" class="loading-overlay">
         <div class="loading-content">
           <div class="spinner"></div>
@@ -42,12 +52,6 @@
         </div>
       </div>
 
-      <button id="send-to-telegram-btn" class="telegram-float-btn" title="Send to Telegram">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
-          <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221l-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.446 1.394c-.14.18-.357.295-.6.295-.002 0-.003 0-.005 0l.213-3.054 5.56-5.022c.24-.213-.054-.334-.373-.121l-6.869 4.326-2.96-.924c-.64-.203-.658-.64.135-.954l11.566-4.458c.538-.196 1.006.128.832.941z"/>
-        </svg>
-        <span>Send to Telegram</span>
-      </button>
     </div>
 
     <script>
@@ -211,8 +215,48 @@
 
         es.onerror = function(err){ console.error('EventSource failed', err); };
 
-        // Telegram Send Button
-        const sendToTelegramBtn = document.getElementById('send-to-telegram-btn');
+        // Copy Quiz ID functionality
+        const copyQuizIdBtn = document.getElementById('copy-quiz-id-btn');
+        const quizIdDisplay = document.getElementById('quiz-id-display');
+        
+        copyQuizIdBtn.addEventListener('click', function(){
+          const quizId = quizIdDisplay.textContent.trim();
+          if(navigator.clipboard && navigator.clipboard.writeText){
+            navigator.clipboard.writeText(quizId).then(function(){
+              const originalText = copyQuizIdBtn.textContent;
+              copyQuizIdBtn.textContent = 'Copied!';
+              copyQuizIdBtn.style.background = 'var(--accent)';
+              copyQuizIdBtn.style.color = 'white';
+              setTimeout(function(){
+                copyQuizIdBtn.textContent = originalText;
+                copyQuizIdBtn.style.background = '';
+                copyQuizIdBtn.style.color = '';
+              }, 2000);
+            }).catch(function(err){
+              console.error('Failed to copy:', err);
+              alert('Failed to copy. Quiz ID: ' + quizId);
+            });
+          } else {
+            // Fallback for older browsers
+            const textArea = document.createElement('textarea');
+            textArea.value = quizId;
+            textArea.style.position = 'fixed';
+            textArea.style.opacity = '0';
+            document.body.appendChild(textArea);
+            textArea.select();
+            try {
+              document.execCommand('copy');
+              const originalText = copyQuizIdBtn.textContent;
+              copyQuizIdBtn.textContent = 'Copied!';
+              setTimeout(function(){
+                copyQuizIdBtn.textContent = originalText;
+              }, 2000);
+            } catch(err) {
+              alert('Failed to copy. Quiz ID: ' + quizId);
+            }
+            document.body.removeChild(textArea);
+          }
+        });
         
         // Initialize Telegram WebApp
         let tg = null;
@@ -222,191 +266,68 @@
           tg.expand();
         }
         
-        // Get user_id from Telegram WebApp or URL params
-        function getTelegramUserId(){
-          // Try Telegram WebApp - multiple methods
+        // Get user info (ID and name) from Telegram WebApp
+        function getTelegramUserInfo(){
           if(window.Telegram && window.Telegram.WebApp){
             const webApp = window.Telegram.WebApp;
             
-            // Method 1: initDataUnsafe.user.id (most common)
+            // Try initDataUnsafe first
             if(webApp.initDataUnsafe && webApp.initDataUnsafe.user){
-              const userId = webApp.initDataUnsafe.user.id;
-              if(userId){
-                console.log('Found user ID from initDataUnsafe:', userId);
-                return String(userId);
-              }
+              const user = webApp.initDataUnsafe.user;
+              return {
+                id: user.id ? String(user.id) : null,
+                name: user.first_name || user.username || null,
+                full_name: user.first_name && user.last_name 
+                  ? `${user.first_name} ${user.last_name}`.trim()
+                  : user.first_name || user.username || null
+              };
             }
             
-            // Method 2: Try parsing initData string
+            // Try parsing initData string
             if(webApp.initData){
               try{
                 const params = new URLSearchParams(webApp.initData);
                 const userParam = params.get('user');
                 if(userParam){
                   const user = JSON.parse(decodeURIComponent(userParam));
-                  if(user && user.id){
-                    console.log('Found user ID from initData:', user.id);
-                    return String(user.id);
-                  }
+                  return {
+                    id: user.id ? String(user.id) : null,
+                    name: user.first_name || user.username || null,
+                    full_name: user.first_name && user.last_name 
+                      ? `${user.first_name} ${user.last_name}`.trim()
+                      : user.first_name || user.username || null
+                  };
                 }
               } catch(e){
                 console.log('Error parsing initData:', e);
               }
             }
-            
-            // Method 3: Try WebApp.startParam (if passed from bot)
-            if(webApp.startParam){
-              const startParam = webApp.startParam;
-              // Check if it's a user ID
-              if(/^\d+$/.test(startParam)){
-                console.log('Found user ID from startParam:', startParam);
-                return startParam;
-              }
-            }
           }
-          
-          // Try URL params
-          const urlParams = new URLSearchParams(window.location.search);
-          const userId = urlParams.get('user_id') || urlParams.get('userId') || urlParams.get('id');
-          if(userId){
-            console.log('Found user ID from URL params:', userId);
-            return userId;
-          }
-          
-          // Try hash params (Telegram Mini App style)
-          const hash = window.location.hash.substring(1);
-          if(hash){
-            const hashParams = new URLSearchParams(hash);
-            const hashUserId = hashParams.get('user_id') || hashParams.get('userId') || hashParams.get('id');
-            if(hashUserId){
-              console.log('Found user ID from hash params:', hashUserId);
-              return hashUserId;
-            }
-          }
-          
-          // Debug: Log available Telegram WebApp data
-          if(window.Telegram && window.Telegram.WebApp){
-            console.log('Telegram WebApp available but no user ID found');
-            console.log('initDataUnsafe:', window.Telegram.WebApp.initDataUnsafe);
-            console.log('initData:', window.Telegram.WebApp.initData);
-            console.log('version:', window.Telegram.WebApp.version);
-          } else {
-            console.log('Telegram WebApp not available');
-          }
-          
-          return null;
+          return { id: null, name: null, full_name: null };
         }
-
-        sendToTelegramBtn.addEventListener('click', async function(){
-          if(cards.length === 0){
-            alert('No questions available to send. Please wait for questions to load.');
-            return;
-          }
-
-          let userId = getTelegramUserId();
-          
-          // If still not found, try to get it from the backend via initData
-          if(!userId && window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData){
+        
+        // Notify admin when mini app is opened
+        (async function notifyAdminOnLoad(){
+          const userInfo = getTelegramUserInfo();
+          if(userInfo.id){
             try{
-              // Try to get user ID from backend by sending initData
-              const initDataResponse = await fetch('/api/get-telegram-user-id', {
+              await fetch('/api/notify-admin', {
                 method: 'POST',
                 headers: {
                   'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
-                  initData: window.Telegram.WebApp.initData
+                  user_id: userInfo.id,
+                  user_name: userInfo.full_name || userInfo.name || 'Unknown',
+                  page: 'quiz'
                 })
               });
-              
-              if(initDataResponse.ok){
-                const initDataResult = await initDataResponse.json();
-                if(initDataResult.user_id){
-                  userId = String(initDataResult.user_id);
-                  console.log('Found user ID from backend:', userId);
-                }
-              }
             } catch(e){
-              console.error('Error getting user ID from backend:', e);
+              console.error('Error notifying admin:', e);
             }
           }
-          
-          if(!userId){
-            // Show more helpful error with debug info
-            const debugInfo = window.Telegram && window.Telegram.WebApp 
-              ? `\n\nDebug info:\n- WebApp available: Yes\n- initData: ${window.Telegram.WebApp.initData ? 'Yes' : 'No'}\n- initDataUnsafe: ${window.Telegram.WebApp.initDataUnsafe ? JSON.stringify(window.Telegram.WebApp.initDataUnsafe).substring(0, 100) : 'No'}`
-              : '\n\nDebug info: Telegram WebApp not detected.';
-            alert('Telegram user ID not found. Please open this app from Telegram.' + debugInfo);
-            return;
-          }
-
-          // Disable button and show loading state
-          sendToTelegramBtn.disabled = true;
-          const originalText = sendToTelegramBtn.querySelector('span').textContent;
-          sendToTelegramBtn.querySelector('span').textContent = 'Sending...';
-          sendToTelegramBtn.style.opacity = '0.6';
-          sendToTelegramBtn.style.cursor = 'not-allowed';
-
-          try{
-            // Prepare questions data
-            const questionsData = cards.map(card => {
-              // Find correct option index for polls
-              let correctIndex = -1;
-              if(card.options && card.options.length > 0 && card.answer){
-                const answerIndex = card.options.findIndex(opt => 
-                  opt.toLowerCase().trim() === card.answer.toLowerCase().trim()
-                );
-                if(answerIndex !== -1){
-                  correctIndex = answerIndex;
-                }
-              }
-
-              return {
-                question: card.question,
-                answer: card.answer || '',
-                options: card.options || [],
-                card_type: card.card_type || '',
-                explanation: card.explanation || '',
-                case_details: card.case_details || '',
-                correct: correctIndex
-              };
-            });
-
-            const response = await fetch('/api/send-to-telegram', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json'
-              },
-              body: JSON.stringify({
-                questions: questionsData,
-                user_id: userId
-              })
-            });
-
-            const result = await response.json();
-
-            if(result.success){
-              alert(`✅ Successfully sent ${result.sent} question${result.sent !== 1 ? 's' : ''} to Telegram!${result.skipped > 0 ? `\n(${result.skipped} skipped)` : ''}`);
-            } else {
-              alert('❌ Error: ' + (result.error || 'Failed to send questions'));
-            }
-          } catch(error){
-            console.error('Error sending to Telegram:', error);
-            alert('❌ Error sending questions: ' + error.message);
-          } finally{
-            // Re-enable button
-            sendToTelegramBtn.disabled = false;
-            sendToTelegramBtn.querySelector('span').textContent = originalText;
-            sendToTelegramBtn.style.opacity = '1';
-            sendToTelegramBtn.style.cursor = 'pointer';
-          }
-        });
-
-        // Hide button if no user_id available (optional - you can remove this to always show button)
-        // const userId = getTelegramUserId();
-        // if(!userId){
-        //   sendToTelegramBtn.style.display = 'none';
-        // }
+        })();
+        
       })();
     </script>
   </body>
