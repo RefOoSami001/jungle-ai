@@ -25,8 +25,7 @@
         <h3 style="margin:0 0 12px 0;font-size:18px;font-weight:600">Load Existing Quiz</h3>
         <form method="get" action="/" style="display:flex;gap:8px;align-items:flex-end">
           <div style="flex:1">
-            <label class="small">Enter Quiz ID:</label>
-            <input type="text" name="quiz_id" id="quiz-id-input" class="input" placeholder="e.g., eK6fVwO4KTa7cGDLdGmW" style="margin-top:8px">
+            <input type="text" name="quiz_id" id="quiz-id-input" class="input" placeholder="Enter Quiz ID,e.g., eK6fVwO4KTa7c..." style="margin-top:8px">
           </div>
           <button type="submit" class="btn" style="flex-shrink:0;padding:10px 20px">Load Quiz</button>
         </form>
@@ -77,7 +76,7 @@
                   <div class="segmented" role="radiogroup">
                     <label class="seg-item"><input type="radio" name="question_type" value="Multiple Choice Question" checked><span>MCQ</span></label>
                     <label class="seg-item"><input type="radio" name="question_type" value="Case Scenario Multiple Choice Question"><span>CASE</span></label>
-                    <label class="seg-item"><input type="radio" name="question_type" value="Understanding Question"><span>Open</span></label>
+                    <label class="seg-item"><input type="radio" name="question_type" value="Understanding Question"><span>OPEN</span></label>
                     <label class="seg-item"><input type="radio" name="question_type" value="True/False Question"><span>T/F</span></label>
                   </div>
                 </div>
@@ -102,7 +101,7 @@
               </div>
 
               <div style="margin-top:18px" class="actions">
-                <button class="btn" type="submit" style="width:100%">Generate Quiz</button>
+                <button class="btn" type="submit" style="width:100%; font-size: 16px;">Generate Quiz</button>
               </div>
             </div>
           </div>
