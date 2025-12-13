@@ -10,6 +10,7 @@ from werkzeug.utils import secure_filename
 import PyPDF2
 import pdfplumber
 from docx import Document
+from upload_file import upload_pdf_to_s3
 
 app = Flask(__name__)
 
@@ -41,7 +42,7 @@ HEADERS = {
 }
 
 # Replace this with a real user_id if you have one
-DEFAULT_USER_ID = 'qnpzdCAWX7VOkFp61r9WR365kkd2'
+DEFAULT_USER_ID = '2ih2TpB168QyRBl8mfxBeiGjqD83'
 
 
 def allowed_file(filename):
@@ -51,6 +52,10 @@ def allowed_file(filename):
 def extract_text_from_pdf(file_path, start_page=None, end_page=None):
     """Extract text from PDF file, optionally with page range."""
     text_parts = []
+    total_pages = 0
+    pages_with_text = 0
+    pages_processed = 0
+    
     try:
         # Try pdfplumber first (better text extraction)
         with pdfplumber.open(file_path) as pdf:
@@ -63,10 +68,34 @@ def extract_text_from_pdf(file_path, start_page=None, end_page=None):
             end = max(start + 1, min(end, total_pages))
             
             for i in range(start, end):
-                page = pdf.pages[i]
-                page_text = page.extract_text()
-                if page_text:
-                    text_parts.append(page_text)
+                pages_processed += 1
+                try:
+                    page = pdf.pages[i]
+                    # Try multiple extraction methods
+                    page_text = page.extract_text()
+                    
+                    # If no text, try extracting tables and other content
+                    if not page_text or not page_text.strip():
+                        # Try extracting tables
+                        tables = page.extract_tables()
+                        if tables:
+                            for table in tables:
+                                table_text = '\n'.join([' | '.join([str(cell) if cell else '' for cell in row]) for row in table])
+                                if table_text.strip():
+                                    page_text = (page_text or '') + '\n' + table_text
+                    
+                    # Try alternative extraction method
+                    if not page_text or not page_text.strip():
+                        page_text = page.extract_text(layout=True)
+                    
+                    if page_text and page_text.strip():
+                        text_parts.append(page_text.strip())
+                        pages_with_text += 1
+                except Exception as page_error:
+                    # Continue with next page if one page fails
+                    print(f"Warning: Failed to extract text from page {i+1}: {page_error}")
+                    continue
+                    
     except Exception as e:
         # Fallback to PyPDF2
         try:
@@ -80,10 +109,30 @@ def extract_text_from_pdf(file_path, start_page=None, end_page=None):
                 end = max(start + 1, min(end, total_pages))
                 
                 for i in range(start, end):
-                    page = pdf_reader.pages[i]
-                    text_parts.append(page.extract_text())
+                    pages_processed += 1
+                    try:
+                        page = pdf_reader.pages[i]
+                        page_text = page.extract_text()
+                        if page_text and page_text.strip():
+                            text_parts.append(page_text.strip())
+                            pages_with_text += 1
+                    except Exception as page_error:
+                        print(f"Warning: Failed to extract text from page {i+1}: {page_error}")
+                        continue
         except Exception as e2:
             raise Exception(f"Failed to extract PDF text: {str(e2)}")
+    
+    # Check if we got any text
+    if not text_parts:
+        error_msg = f"No text could be extracted from the PDF"
+        if pages_processed > 0:
+            error_msg += f" (processed {pages_processed} page{'s' if pages_processed > 1 else ''})"
+        error_msg += ". The PDF might be image-based (scanned) or encrypted. Please ensure the PDF contains selectable text."
+        raise Exception(error_msg)
+    
+    # Warn if some pages had no text
+    if pages_with_text < pages_processed:
+        print(f"Warning: Only {pages_with_text} out of {pages_processed} pages contained extractable text")
     
     return '\n\n'.join(text_parts), total_pages
 
@@ -136,19 +185,23 @@ def index():
 
 @app.route('/generate', methods=['POST'])
 def generate():
-    input_method = request.form.get('input_method', 'text')
-    topic_text = request.form.get('topic_text', '').strip()
     amount = request.form.get('amount', 'low')
     difficulty = request.form.get('difficulty', 'Advanced')
     types = request.form.getlist('question_type')
     user_id = request.form.get('user_id', DEFAULT_USER_ID)
     
-    # Handle file upload only if input_method is 'file'
+    # Handle file upload
     uploaded_file = None
     file_path = None
     extracted_text = ''
+    s3_object_key = None
+    s3_url = None
+    total_pages = 0
+    filename = ''
+    start_page = None
+    end_page = None
     
-    if input_method == 'file' and 'file' in request.files:
+    if 'file' in request.files:
         file = request.files['file']
         if file and file.filename and allowed_file(file.filename):
             filename = secure_filename(file.filename)
@@ -159,8 +212,6 @@ def generate():
             # Get page range if provided
             page_start = request.form.get('page_start', '').strip()
             page_end = request.form.get('page_end', '').strip()
-            start_page = None
-            end_page = None
             
             # Validate and parse page range
             if page_start and page_start.isdigit():
@@ -212,59 +263,81 @@ def generate():
                 if not extracted_text or not extracted_text.strip():
                     if os.path.exists(file_path):
                         os.remove(file_path)
-                    return render_template('index.html', error='No text could be extracted from the file. Please check the file or page range.')
+                    error_msg = 'No text could be extracted from the file. '
+                    if filename.lower().endswith('.pdf'):
+                        error_msg += 'The PDF might be image-based (scanned), encrypted, or the selected page range might be empty. Please ensure the PDF contains selectable text or try a different page range.'
+                    else:
+                        error_msg += 'Please check the file or page range.'
+                    return render_template('index.html', error=error_msg)
                 
-                # Clean up uploaded file after extraction
+                # Upload file to S3 before cleanup
+                content_medium_type = 'PDF' if filename.lower().endswith('.pdf') else 'DOCX'
+                upload_result = upload_pdf_to_s3(file_path, user_id, content_medium_type)
+                
+                if not upload_result.get('success'):
+                    if os.path.exists(file_path):
+                        os.remove(file_path)
+                    return render_template('index.html', error=f'Failed to upload file to S3: {upload_result.get("error", "Unknown error")}')
+                
+                s3_object_key = upload_result.get('s3_object_key')
+                s3_url = upload_result.get('s3_url')
+                
+                # Clean up uploaded file after S3 upload
                 if os.path.exists(file_path):
                     os.remove(file_path)
             except Exception as e:
                 if os.path.exists(file_path):
                     os.remove(file_path)
-                return render_template('index.html', error=f'Error extracting text from file: {str(e)}')
-        else:
-            return render_template('index.html', error='Please select a valid PDF or Word file')
-    
-    # Use extracted text from file if available, otherwise use topic_text
-    if input_method == 'file':
-        final_text = extracted_text
-        if not final_text:
-            return render_template('index.html', error='Please upload a file and ensure text can be extracted')
+                error_message = str(e)
+                # Provide more helpful error messages
+                if 'No text could be extracted' in error_message:
+                    return render_template('index.html', error=error_message)
+                elif 'Failed to extract' in error_message:
+                    return render_template('index.html', error=f'Error extracting text: {error_message}. The file might be corrupted or in an unsupported format.')
+                else:
+                    return render_template('index.html', error=f'Error processing file: {error_message}')
     else:
-        final_text = topic_text
-        if not final_text:
-            return render_template('index.html', error='Please enter some text')
+        return render_template('index.html', error='Please select a valid PDF or Word file')
+    
+    # Use extracted text from file
+    final_text = extracted_text
+    if not final_text:
+        return render_template('index.html', error='Please upload a file and ensure text can be extracted')
 
     question_types = build_question_types(types, difficulty=difficulty)
+    
+    # Determine content type and file name
+    content_type = 'PDF' if filename.lower().endswith('.pdf') else 'DOCX'
+    original_filename = uploaded_file.filename if uploaded_file else filename
 
     json_data = {
         'should_run_generations_with_new_architecture': True,
         'pdf_pages_text_array': [final_text],
-        'page_text_sentences_array': [],
-        'page_url': 'https://wisdolia-download-bucket.s3.amazonaws.com/Respiratory-Failure_a844025e-afec-4a94-a3c1-06b0b32b9ccb.pdf',
+        'page_text_sentences_array': [final_text],
+        'page_url': s3_url or '',
         'page_title': '',
-        'content_medium_type': 'PDF',
-        'uploaded_file_s3_object_key': 'Respiratory-Failure_a844025e-afec-4a94-a3c1-06b0b32b9ccb.pdf',
-        'user_id': 'qnpzdCAWX7VOkFp61r9WR365kkd2',
+        'content_medium_type': content_type,
+        'uploaded_file_s3_object_key': s3_object_key or '',
+        'user_id': user_id,
         'question_types_user_selected_to_generate': question_types,
-        'session_id': '4da2bb95-4833-46c6-b2b2-1054e6e66532',
+        'session_id': str(uuid.uuid4()),
         'platform': 'Web',
         'youtubeTranscriptStartMinute': 0,
         'youtubeTranscriptEndMinute': 0,
-        'pdfStartingPage': 1,
-        'pdfEndingPage': 300,
+        'pdfStartingPage': start_page if start_page else 1,
+        'pdfEndingPage': end_page if end_page else total_pages,
         'did_user_input_url_for_pdf': False,
         'level_for_amount_of_cards_to_generate': amount,
         'selected_images_for_occlusion': [],
-        'pdf_file_name': 'Respiratory Failure.pdf',
+        'pdf_file_name': original_filename,
         'video_or_audio_starting_minute': 0,
         'video_or_audio_ending_minute': None,
         'video_or_audio_num_minutes': None,
         'deck_id_to_save_cards_to': None,
-        'pdf_images_object_list_doc_id': 'dd80059c-7b40-4183-98d4-a24fe83472b9',
-        'pdf_num_pages': 300,
+        'pdf_images_object_list_doc_id': str(uuid.uuid4()),
+        'pdf_num_pages': total_pages,
         'didGetGeneratedWithMultipleUploadedDocuments': False,
     }
-
     try:
         resp = requests.post(
             'https://cbackend.jungleai.com/generate_content/run_all_generations_for_file_or_url',
