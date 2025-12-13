@@ -457,9 +457,8 @@ def send_admin_notification(user_id, user_name, page='index'):
     
     try:
         message = f"📱 Mini app opened\n\n"
-        message += f"User: #{user_id}\n"
+        message += f"User: {user_id}\n"
         message += f"Name: {user_name or 'Unknown'}\n"
-        message += f"Page: {page}"
         
         resp = requests.post(
             f'{TELEGRAM_API_URL}/sendMessage',
