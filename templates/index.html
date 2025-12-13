@@ -6,6 +6,7 @@
     <title>AI Quiz Generator</title>
     <link rel="stylesheet" href="/static/styles.css">
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="/static/common.js"></script>
   </head>
   <body>
     <div class="container">
@@ -82,13 +83,13 @@
               </div>
 
               <div style="margin-top:18px">
-                <label class="small">Question types</label>
+                <label class="small">Question types (select one or more)</label>
                 <div class="question-types">
-                  <div class="segmented" role="radiogroup">
-                    <label class="seg-item"><input type="radio" name="question_type" value="Multiple Choice Question" checked><span>MCQ</span></label>
-                    <label class="seg-item"><input type="radio" name="question_type" value="Case Scenario Multiple Choice Question"><span>CASE</span></label>
-                    <label class="seg-item"><input type="radio" name="question_type" value="Understanding Question"><span>OPEN</span></label>
-                    <label class="seg-item"><input type="radio" name="question_type" value="True/False Question"><span>T/F</span></label>
+                  <div class="segmented" role="group" style="flex-wrap:wrap">
+                    <label class="seg-item"><input type="checkbox" name="question_type" value="Multiple Choice Question" checked><span>MCQ</span></label>
+                    <label class="seg-item"><input type="checkbox" name="question_type" value="Case Scenario Multiple Choice Question"><span>CASE</span></label>
+                    <label class="seg-item"><input type="checkbox" name="question_type" value="Understanding Question"><span>OPEN</span></label>
+                    <label class="seg-item"><input type="checkbox" name="question_type" value="True/False Question"><span>T/F</span></label>
                   </div>
                 </div>
               </div>
@@ -125,75 +126,15 @@
 
     <script>
       (function(){
-        // Initialize Telegram WebApp
-        if(window.Telegram && window.Telegram.WebApp){
-          const tg = window.Telegram.WebApp;
-          tg.ready();
-          tg.expand();
-        }
+        'use strict';
         
-        // Get user info (ID and name) from Telegram WebApp
-        function getTelegramUserInfo(){
-          if(window.Telegram && window.Telegram.WebApp){
-            const webApp = window.Telegram.WebApp;
-            
-            // Try initDataUnsafe first
-            if(webApp.initDataUnsafe && webApp.initDataUnsafe.user){
-              const user = webApp.initDataUnsafe.user;
-              return {
-                id: user.id ? String(user.id) : null,
-                name: user.first_name || user.username || null,
-                full_name: user.first_name && user.last_name 
-                  ? `${user.first_name} ${user.last_name}`.trim()
-                  : user.first_name || user.username || null
-              };
-            }
-            
-            // Try parsing initData string
-            if(webApp.initData){
-              try{
-                const params = new URLSearchParams(webApp.initData);
-                const userParam = params.get('user');
-                if(userParam){
-                  const user = JSON.parse(decodeURIComponent(userParam));
-                  return {
-                    id: user.id ? String(user.id) : null,
-                    name: user.first_name || user.username || null,
-                    full_name: user.first_name && user.last_name 
-                      ? `${user.first_name} ${user.last_name}`.trim()
-                      : user.first_name || user.username || null
-                  };
-                }
-              } catch(e){
-                console.log('Error parsing initData:', e);
-              }
-            }
-          }
-          return { id: null, name: null, full_name: null };
-        }
+        // Initialize Telegram WebApp
+        initTelegramWebApp();
         
         // Notify admin when mini app is opened
-        (async function notifyAdminOnLoad(){
-          const userInfo = getTelegramUserInfo();
-          if(userInfo.id){
-            try{
-              await fetch('/api/notify-admin', {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                  user_id: userInfo.id,
-                  user_name: userInfo.full_name || userInfo.name || 'Unknown',
-                  page: 'index'
-                })
-              });
-            } catch(e){
-              console.error('Error notifying admin:', e);
-            }
-          }
-        })();
+        notifyAdmin('index');
         
+        // DOM elements
         const fileInput = document.getElementById('file-input');
         const fileUploadArea = document.getElementById('file-upload-area');
         const fileUploadContent = document.getElementById('file-upload-content');
@@ -214,152 +155,156 @@
         let maxPages = null;
         let isPDF = false;
 
-        // Format file size
-        function formatFileSize(bytes){
-          if(bytes === 0) return '0 Bytes';
-          const k = 1024;
-          const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-          const i = Math.floor(Math.log(bytes) / Math.log(k));
-          return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
-        }
-
         // Remove file handler
-        removeFileBtn.addEventListener('click', function(e){
+        removeFileBtn.addEventListener('click', function(e) {
           e.preventDefault();
           fileInput.value = '';
           fileUploadContent.style.display = 'flex';
           fileSelectedContent.style.display = 'none';
           pageRangeContainer.style.display = 'none';
           maxPages = null;
+          pageStart.value = '';
+          pageEnd.value = '';
+          pageRangeError.style.display = 'none';
         });
 
         // Drag and drop handlers
-        fileUploadArea.addEventListener('dragover', function(e){
+        fileUploadArea.addEventListener('dragover', function(e) {
           e.preventDefault();
           e.stopPropagation();
           fileUploadArea.classList.add('drag-over');
         });
 
-        fileUploadArea.addEventListener('dragleave', function(e){
+        fileUploadArea.addEventListener('dragleave', function(e) {
           e.preventDefault();
           e.stopPropagation();
           fileUploadArea.classList.remove('drag-over');
         });
 
-        fileUploadArea.addEventListener('drop', function(e){
+        fileUploadArea.addEventListener('drop', function(e) {
           e.preventDefault();
           e.stopPropagation();
           fileUploadArea.classList.remove('drag-over');
           
           const files = e.dataTransfer.files;
-          if(files.length > 0){
+          if (files.length > 0) {
             fileInput.files = files;
             handleFileSelect();
           }
         });
 
-        function handleFileSelect(){
+        function handleFileSelect() {
           const file = fileInput.files[0];
-          if(file){
-            fileName.textContent = file.name;
-            fileSize.textContent = formatFileSize(file.size);
-            fileUploadContent.style.display = 'none';
-            fileSelectedContent.style.display = 'flex';
+          if (!file) return;
+          
+          fileName.textContent = file.name;
+          fileSize.textContent = formatFileSize(file.size);
+          fileUploadContent.style.display = 'none';
+          fileSelectedContent.style.display = 'flex';
+          
+          const fileNameLower = file.name.toLowerCase();
+          isPDF = fileNameLower.endsWith('.pdf');
+          const isWord = fileNameLower.endsWith('.doc') || fileNameLower.endsWith('.docx');
+          
+          if (isPDF || isWord) {
+            pageRangeContainer.style.display = 'block';
+            maxPages = null;
             
-            isPDF = file.name.toLowerCase().endsWith('.pdf');
-            const isWord = file.name.toLowerCase().endsWith('.doc') || file.name.toLowerCase().endsWith('.docx');
-            
-            if(isPDF || isWord){
-              pageRangeContainer.style.display = 'block';
-              maxPages = null;
-              
-              if(isPDF){
-                // Try to get page count from PDF
-                getPDFPageCount(file, function(pageCount){
-                  if(pageCount){
-                    maxPages = pageCount;
-                    totalPages.textContent = '(Max: ' + pageCount + ' pages)';
-                    pageStart.setAttribute('max', pageCount);
-                    pageEnd.setAttribute('max', pageCount);
-                    validatePageRange();
-                  } else {
-                    totalPages.textContent = '(Page count will be determined after upload)';
-                  }
-                });
-              } else {
-                totalPages.textContent = '';
-                pageStart.removeAttribute('max');
-                pageEnd.removeAttribute('max');
-              }
-              
-              pageStart.value = '';
-              pageEnd.value = '';
-              pageRangeError.style.display = 'none';
+            if (isPDF) {
+              // Try to get page count from PDF
+              getPDFPageCount(file, function(pageCount) {
+                if (pageCount) {
+                  maxPages = pageCount;
+                  totalPages.textContent = `(Max: ${pageCount} pages)`;
+                  pageStart.setAttribute('max', pageCount);
+                  pageEnd.setAttribute('max', pageCount);
+                  validatePageRange();
+                } else {
+                  totalPages.textContent = '(Page count will be determined after upload)';
+                }
+              });
             } else {
-              pageRangeContainer.style.display = 'none';
-              maxPages = null;
+              totalPages.textContent = '';
+              pageStart.removeAttribute('max');
+              pageEnd.removeAttribute('max');
             }
+            
+            pageStart.value = '';
+            pageEnd.value = '';
+            pageRangeError.style.display = 'none';
+          } else {
+            pageRangeContainer.style.display = 'none';
+            maxPages = null;
           }
         }
 
         fileInput.addEventListener('change', handleFileSelect);
         
         // Make upload area clickable
-        fileUploadArea.addEventListener('click', function(e){
-          if(e.target === fileUploadArea || e.target.closest('.file-upload-content')){
+        fileUploadArea.addEventListener('click', function(e) {
+          if (e.target === fileUploadArea || e.target.closest('.file-upload-content')) {
             fileInput.click();
           }
         });
 
         // Get PDF page count client-side
-        function getPDFPageCount(file, callback){
+        function getPDFPageCount(file, callback) {
           const reader = new FileReader();
-          reader.onload = function(e){
-            try{
+          
+          reader.onload = function(e) {
+            try {
               const typedArray = new Uint8Array(e.target.result);
               // Simple PDF page count extraction
               const pdfString = new TextDecoder('latin1').decode(typedArray);
               const pageMatches = pdfString.match(/\/Count\s+(\d+)/g);
-              if(pageMatches){
-                const counts = pageMatches.map(m => parseInt(m.match(/\d+/)[0]));
+              
+              if (pageMatches) {
+                const counts = pageMatches.map(m => {
+                  const match = m.match(/\d+/);
+                  return match ? parseInt(match[0], 10) : 0;
+                });
                 const maxCount = Math.max(...counts);
-                if(maxCount > 0) callback(maxCount);
-                else callback(null);
+                callback(maxCount > 0 ? maxCount : null);
               } else {
                 // Fallback: count /Type/Page occurrences
                 const pageOccurrences = (pdfString.match(/\/Type\s*\/Page[^s]/g) || []).length;
-                if(pageOccurrences > 0) callback(pageOccurrences);
-                else callback(null);
+                callback(pageOccurrences > 0 ? pageOccurrences : null);
               }
-            } catch(err){
+            } catch (err) {
               console.error('Error reading PDF:', err);
               callback(null);
             }
           };
+          
+          reader.onerror = function() {
+            console.error('Error reading file');
+            callback(null);
+          };
+          
           reader.readAsArrayBuffer(file);
         }
 
         // Validate page range
-        function validatePageRange(){
-          const start = pageStart.value ? parseInt(pageStart.value) : null;
-          const end = pageEnd.value ? parseInt(pageEnd.value) : null;
+        function validatePageRange() {
+          const start = pageStart.value ? parseInt(pageStart.value, 10) : null;
+          const end = pageEnd.value ? parseInt(pageEnd.value, 10) : null;
           let error = '';
 
-          if(start !== null && start < 1){
+          if (start !== null && start < 1) {
             error = 'Start page must be at least 1';
-          } else if(end !== null && end < 1){
+          } else if (end !== null && end < 1) {
             error = 'End page must be at least 1';
-          } else if(start !== null && end !== null && start > end){
+          } else if (start !== null && end !== null && start > end) {
             error = 'Start page must be less than or equal to end page';
-          } else if(maxPages !== null){
-            if(start !== null && start > maxPages){
-              error = 'Start page cannot exceed ' + maxPages + ' pages';
-            } else if(end !== null && end > maxPages){
-              error = 'End page cannot exceed ' + maxPages + ' pages';
+          } else if (maxPages !== null) {
+            if (start !== null && start > maxPages) {
+              error = `Start page cannot exceed ${maxPages} pages`;
+            } else if (end !== null && end > maxPages) {
+              error = `End page cannot exceed ${maxPages} pages`;
             }
           }
 
-          if(error){
+          if (error) {
             pageRangeError.textContent = error;
             pageRangeError.style.display = 'block';
             return false;
@@ -377,16 +322,24 @@
         pageEnd.addEventListener('blur', validatePageRange);
 
         // Form submission validation and button state
-        form.addEventListener('submit', function(e){
-          if(!fileInput.files || fileInput.files.length === 0){
+        form.addEventListener('submit', function(e) {
+          if (!fileInput.files || fileInput.files.length === 0) {
             e.preventDefault();
             alert('Please select a file to upload');
             return false;
           }
           
+          // Validate at least one question type is selected
+          const selectedQuestionTypes = form.querySelectorAll('input[name="question_type"]:checked');
+          if (selectedQuestionTypes.length === 0) {
+            e.preventDefault();
+            alert('Please select at least one question type');
+            return false;
+          }
+          
           // Validate page range if visible
-          if(pageRangeContainer.style.display !== 'none'){
-            if(!validatePageRange()){
+          if (pageRangeContainer.style.display !== 'none') {
+            if (!validatePageRange()) {
               e.preventDefault();
               return false;
             }
