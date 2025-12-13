@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>Generated Quiz</title>
     <link rel="stylesheet" href="/static/styles.css">
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </head>
   <body>
     <div class="container">
@@ -213,27 +214,84 @@
         // Telegram Send Button
         const sendToTelegramBtn = document.getElementById('send-to-telegram-btn');
         
+        // Initialize Telegram WebApp
+        let tg = null;
+        if(window.Telegram && window.Telegram.WebApp){
+          tg = window.Telegram.WebApp;
+          tg.ready();
+          tg.expand();
+        }
+        
         // Get user_id from Telegram WebApp or URL params
         function getTelegramUserId(){
-          // Try Telegram WebApp first
+          // Try Telegram WebApp - multiple methods
           if(window.Telegram && window.Telegram.WebApp){
-            const user = window.Telegram.WebApp.initDataUnsafe?.user;
-            if(user && user.id){
-              return String(user.id);
+            const webApp = window.Telegram.WebApp;
+            
+            // Method 1: initDataUnsafe.user.id (most common)
+            if(webApp.initDataUnsafe && webApp.initDataUnsafe.user){
+              const userId = webApp.initDataUnsafe.user.id;
+              if(userId){
+                console.log('Found user ID from initDataUnsafe:', userId);
+                return String(userId);
+              }
+            }
+            
+            // Method 2: Try parsing initData string
+            if(webApp.initData){
+              try{
+                const params = new URLSearchParams(webApp.initData);
+                const userParam = params.get('user');
+                if(userParam){
+                  const user = JSON.parse(decodeURIComponent(userParam));
+                  if(user && user.id){
+                    console.log('Found user ID from initData:', user.id);
+                    return String(user.id);
+                  }
+                }
+              } catch(e){
+                console.log('Error parsing initData:', e);
+              }
+            }
+            
+            // Method 3: Try WebApp.startParam (if passed from bot)
+            if(webApp.startParam){
+              const startParam = webApp.startParam;
+              // Check if it's a user ID
+              if(/^\d+$/.test(startParam)){
+                console.log('Found user ID from startParam:', startParam);
+                return startParam;
+              }
             }
           }
           
           // Try URL params
           const urlParams = new URLSearchParams(window.location.search);
-          const userId = urlParams.get('user_id');
-          if(userId) return userId;
+          const userId = urlParams.get('user_id') || urlParams.get('userId') || urlParams.get('id');
+          if(userId){
+            console.log('Found user ID from URL params:', userId);
+            return userId;
+          }
           
           // Try hash params (Telegram Mini App style)
           const hash = window.location.hash.substring(1);
           if(hash){
             const hashParams = new URLSearchParams(hash);
-            const hashUserId = hashParams.get('user_id');
-            if(hashUserId) return hashUserId;
+            const hashUserId = hashParams.get('user_id') || hashParams.get('userId') || hashParams.get('id');
+            if(hashUserId){
+              console.log('Found user ID from hash params:', hashUserId);
+              return hashUserId;
+            }
+          }
+          
+          // Debug: Log available Telegram WebApp data
+          if(window.Telegram && window.Telegram.WebApp){
+            console.log('Telegram WebApp available but no user ID found');
+            console.log('initDataUnsafe:', window.Telegram.WebApp.initDataUnsafe);
+            console.log('initData:', window.Telegram.WebApp.initData);
+            console.log('version:', window.Telegram.WebApp.version);
+          } else {
+            console.log('Telegram WebApp not available');
           }
           
           return null;
@@ -245,9 +303,40 @@
             return;
           }
 
-          const userId = getTelegramUserId();
+          let userId = getTelegramUserId();
+          
+          // If still not found, try to get it from the backend via initData
+          if(!userId && window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData){
+            try{
+              // Try to get user ID from backend by sending initData
+              const initDataResponse = await fetch('/api/get-telegram-user-id', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                  initData: window.Telegram.WebApp.initData
+                })
+              });
+              
+              if(initDataResponse.ok){
+                const initDataResult = await initDataResponse.json();
+                if(initDataResult.user_id){
+                  userId = String(initDataResult.user_id);
+                  console.log('Found user ID from backend:', userId);
+                }
+              }
+            } catch(e){
+              console.error('Error getting user ID from backend:', e);
+            }
+          }
+          
           if(!userId){
-            alert('Telegram user ID not found. Please open this app from Telegram.');
+            // Show more helpful error with debug info
+            const debugInfo = window.Telegram && window.Telegram.WebApp 
+              ? `\n\nDebug info:\n- WebApp available: Yes\n- initData: ${window.Telegram.WebApp.initData ? 'Yes' : 'No'}\n- initDataUnsafe: ${window.Telegram.WebApp.initDataUnsafe ? JSON.stringify(window.Telegram.WebApp.initDataUnsafe).substring(0, 100) : 'No'}`
+              : '\n\nDebug info: Telegram WebApp not detected.';
+            alert('Telegram user ID not found. Please open this app from Telegram.' + debugInfo);
             return;
           }
 
