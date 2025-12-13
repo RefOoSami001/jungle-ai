@@ -1,0 +1,324 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Generated Quiz</title>
+    <link rel="stylesheet" href="/static/styles.css">
+  </head>
+  <body>
+    <div class="container">
+      <div class="topbar">
+        <div class="brand">
+          <div class="logo">QG</div>
+          <p>RefOo Quiz Generator</p>
+        </div>
+      </div>
+      <div id="deck-id" style="display:none">{{ deck_id }}</div>
+
+      <div id="loading-indicator" class="loading-overlay">
+        <div class="loading-content">
+          <div class="spinner"></div>
+          <div style="margin-top:16px;color:var(--muted);font-size:14px">Generating questions...</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="meta" id="progress">Question 0 of 0</div>
+        <div id="cards" class="quiz-grid">
+          <!-- Single-card exam UI will be rendered client-side. If any initial cards were passed, they will be shown by JS. -->
+        </div>
+      </div>
+
+      <div class="fixed-controls">
+        <div class="control-row" style="display:flex;gap:12px;align-items:center">
+          <div class="left-controls" style="flex:1;display:flex;gap:8px;align-items:center">
+            <button id="prev" class="btn ghost prev-button" style="width:100%">Previous</button>
+          </div>
+          <div class="right-controls" style="flex:4">
+            <button id="next" class="btn next-button" style="width:100%">Next</button>
+          </div>
+        </div>
+      </div>
+
+      <button id="send-to-telegram-btn" class="telegram-float-btn" title="Send to Telegram">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+          <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221l-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.446 1.394c-.14.18-.357.295-.6.295-.002 0-.003 0-.005 0l.213-3.054 5.56-5.022c.24-.213-.054-.334-.373-.121l-6.869 4.326-2.96-.924c-.64-.203-.658-.64.135-.954l11.566-4.458c.538-.196 1.006.128.832.941z"/>
+        </svg>
+        <span>Send to Telegram</span>
+      </button>
+    </div>
+
+    <script>
+      (function(){
+        const deckId = document.getElementById('deck-id').textContent.trim();
+        const cardsContainer = document.getElementById('cards');
+        
+
+        // exam state
+        let cards = [];
+        let idx = 0;
+
+        const prevBtn = document.getElementById('prev');
+        const nextBtn = document.getElementById('next');
+        const progress = document.getElementById('progress');
+
+        function renderCardAt(i){
+          const slot = document.getElementById('card-slot');
+          if(!slot) return;
+          slot.innerHTML = '';
+          if(cards.length===0){
+            slot.innerHTML = '<div class="card-quiz"><div class="q">No cards yet — waiting for generation</div></div>';
+            progress.textContent = 'Question 0 of 0';
+            prevBtn.disabled = true; nextBtn.disabled = true;
+            return;
+          }
+          const c = cards[i];
+          progress.textContent = 'Question ' + (i+1) + ' of ' + cards.length;
+
+          const wrapper = document.createElement('div'); wrapper.className='card-quiz'; wrapper.setAttribute('data-card-id', c.card_id);
+          if(c.card_type){ const b = document.createElement('div'); b.className='badge'; b.textContent=c.card_type; wrapper.appendChild(b); }
+          if(c.case_details){ const cs = document.createElement('div'); cs.className='case'; cs.innerHTML = '<em>Case:</em> ' + c.case_details; wrapper.appendChild(cs); }
+          const q = document.createElement('div'); q.className='q'; q.textContent = c.question; wrapper.appendChild(q);
+
+          if(c.options && c.options.length){
+            const opts = document.createElement('div'); opts.className='options';
+            c.options.forEach((opt,ii) => {
+                const lab = document.createElement('label'); lab.className='option';
+                const inp = document.createElement('input'); inp.type='radio'; inp.name='answer'; inp.value = opt; inp.id = 'opt'+ii;
+                lab.appendChild(inp);
+
+                const inner = document.createElement('div'); inner.className='option-inner';
+                const txtdiv = document.createElement('div'); txtdiv.className='option-text'; txtdiv.textContent = opt;
+                inner.appendChild(txtdiv);
+                lab.appendChild(inner);
+
+                // immediate validation when user selects an option
+                inp.addEventListener('change', function(e){
+                  // prevent double-handling
+                  if(lab.dataset.locked) return;
+                  lab.dataset.locked = '1';
+
+                  const ansDivLocal = wrapper.querySelector('.answer');
+                  // Understanding/explanation type — show blurred content, allow reveal
+                  if(c.card_type && String(c.card_type).toLowerCase().includes('understand')){
+                    ansDivLocal.style.display = 'block';
+                    ansDivLocal.classList.add('blurred');
+                    // reveal on click
+                    function reveal(){ ansDivLocal.classList.remove('blurred'); ansDivLocal.classList.add('revealed'); ansDivLocal.removeEventListener('click', reveal); }
+                    ansDivLocal.addEventListener('click', reveal);
+                    // lock inputs
+                    wrapper.querySelectorAll('input[name=answer]').forEach(i=>i.disabled=true);
+                    return;
+                  }
+
+                  // MCQ / standard validation
+                  const selectedValue = e.target.value;
+                  const isCorrect = selectedValue === (c.answer || '');
+
+                  // clear any previous highlights
+                  wrapper.querySelectorAll('.option-inner').forEach(el=>el.classList.remove('correct','incorrect'));
+
+                  if(isCorrect){
+                    const chosenInner = e.target.closest('.option').querySelector('.option-inner');
+                    if(chosenInner) chosenInner.classList.add('correct');
+                  } else {
+                    const chosenInner = e.target.closest('.option').querySelector('.option-inner');
+                    if(chosenInner) chosenInner.classList.add('incorrect');
+                    // highlight correct one
+                    const correctInput = Array.from(wrapper.querySelectorAll('input[name=answer]')).find(i=>i.value === (c.answer || ''));
+                    if(correctInput){ const corrInner = correctInput.closest('.option').querySelector('.option-inner'); if(corrInner) corrInner.classList.add('correct'); }
+                  }
+
+                  // show answer text if an answer block exists (only for understanding cards)
+                  if(ansDivLocal){
+                    ansDivLocal.style.display = 'block';
+                    ansDivLocal.textContent = (isCorrect ? 'Correct — ' : 'Incorrect — ') + 'Answer: ' + (c.answer || '');
+                  }
+
+                  // lock inputs
+                  wrapper.querySelectorAll('input[name=answer]').forEach(i=>i.disabled=true);
+                });
+
+                opts.appendChild(lab);
+            });
+            wrapper.appendChild(opts);
+          }
+
+          // For understanding/explanation cards render a blurred explanation block that can be revealed.
+          if(c.card_type && String(c.card_type).toLowerCase().includes('understand')){
+            const ansDiv = document.createElement('div'); ansDiv.className='answer';
+            ansDiv.textContent = c.explanation || c.answer || '';
+            ansDiv.style.display = 'block';
+            ansDiv.classList.add('blurred');
+            function revealInit(){ ansDiv.classList.remove('blurred'); ansDiv.classList.add('revealed'); ansDiv.removeEventListener('click', revealInit); }
+            ansDiv.addEventListener('click', revealInit);
+            wrapper.appendChild(ansDiv);
+          }
+          cardsContainer.innerHTML = ''; // show only the slot
+          const slotWrap = document.createElement('div'); slotWrap.id = 'card-slot'; slotWrap.appendChild(wrapper);
+          cardsContainer.appendChild(slotWrap);
+
+          // update navigation buttons
+          prevBtn.disabled = (i===0);
+          nextBtn.disabled = (i >= cards.length-1);
+        }
+
+        prevBtn.addEventListener('click', ()=>{ if(idx>0){ idx--; renderCardAt(idx); }});
+        nextBtn.addEventListener('click', ()=>{ if(idx < cards.length-1){ idx++; renderCardAt(idx); }});
+
+        // Selection is handled immediately on input change (see input listeners created when rendering options).
+
+        // initial empty slot
+        const slotInit = document.createElement('div'); slotInit.id='card-slot'; cardsContainer.appendChild(slotInit);
+
+        // loading indicator
+        const loadingIndicator = document.getElementById('loading-indicator');
+        let hasShownFirstCard = false;
+
+        function hideLoadingIndicator(){
+          if(loadingIndicator && !hasShownFirstCard){
+            loadingIndicator.style.display = 'none';
+            hasShownFirstCard = true;
+          }
+        }
+
+        // connect EventSource
+        const es = new EventSource(`/stream_cards/${encodeURIComponent(deckId)}`);
+        es.onmessage = function(e){
+          try{
+            const payload = JSON.parse(e.data);
+            if(!payload || !payload.cards) return;
+            payload.cards.forEach(card => {
+              if(!card.card_id) return;
+              if(!cards.find(x=>x.card_id===card.card_id)){
+                cards.push(card);
+              }
+            });
+            // render first card when ready
+            renderCardAt(idx);
+            // hide loading indicator when first card appears
+            if(cards.length > 0){
+              hideLoadingIndicator();
+            }
+          }catch(err){ console.error('invalid message', err, e.data); }
+        };
+
+        es.addEventListener('done', function(){
+          es.close();
+        });
+
+        es.onerror = function(err){ console.error('EventSource failed', err); };
+
+        // Telegram Send Button
+        const sendToTelegramBtn = document.getElementById('send-to-telegram-btn');
+        
+        // Get user_id from Telegram WebApp or URL params
+        function getTelegramUserId(){
+          // Try Telegram WebApp first
+          if(window.Telegram && window.Telegram.WebApp){
+            const user = window.Telegram.WebApp.initDataUnsafe?.user;
+            if(user && user.id){
+              return String(user.id);
+            }
+          }
+          
+          // Try URL params
+          const urlParams = new URLSearchParams(window.location.search);
+          const userId = urlParams.get('user_id');
+          if(userId) return userId;
+          
+          // Try hash params (Telegram Mini App style)
+          const hash = window.location.hash.substring(1);
+          if(hash){
+            const hashParams = new URLSearchParams(hash);
+            const hashUserId = hashParams.get('user_id');
+            if(hashUserId) return hashUserId;
+          }
+          
+          return null;
+        }
+
+        sendToTelegramBtn.addEventListener('click', async function(){
+          if(cards.length === 0){
+            alert('No questions available to send. Please wait for questions to load.');
+            return;
+          }
+
+          const userId = getTelegramUserId();
+          if(!userId){
+            alert('Telegram user ID not found. Please open this app from Telegram.');
+            return;
+          }
+
+          // Disable button and show loading state
+          sendToTelegramBtn.disabled = true;
+          const originalText = sendToTelegramBtn.querySelector('span').textContent;
+          sendToTelegramBtn.querySelector('span').textContent = 'Sending...';
+          sendToTelegramBtn.style.opacity = '0.6';
+          sendToTelegramBtn.style.cursor = 'not-allowed';
+
+          try{
+            // Prepare questions data
+            const questionsData = cards.map(card => {
+              // Find correct option index for polls
+              let correctIndex = -1;
+              if(card.options && card.options.length > 0 && card.answer){
+                const answerIndex = card.options.findIndex(opt => 
+                  opt.toLowerCase().trim() === card.answer.toLowerCase().trim()
+                );
+                if(answerIndex !== -1){
+                  correctIndex = answerIndex;
+                }
+              }
+
+              return {
+                question: card.question,
+                answer: card.answer || '',
+                options: card.options || [],
+                card_type: card.card_type || '',
+                explanation: card.explanation || '',
+                case_details: card.case_details || '',
+                correct: correctIndex
+              };
+            });
+
+            const response = await fetch('/api/send-to-telegram', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                questions: questionsData,
+                user_id: userId
+              })
+            });
+
+            const result = await response.json();
+
+            if(result.success){
+              alert(`✅ Successfully sent ${result.sent} question${result.sent !== 1 ? 's' : ''} to Telegram!${result.skipped > 0 ? `\n(${result.skipped} skipped)` : ''}`);
+            } else {
+              alert('❌ Error: ' + (result.error || 'Failed to send questions'));
+            }
+          } catch(error){
+            console.error('Error sending to Telegram:', error);
+            alert('❌ Error sending questions: ' + error.message);
+          } finally{
+            // Re-enable button
+            sendToTelegramBtn.disabled = false;
+            sendToTelegramBtn.querySelector('span').textContent = originalText;
+            sendToTelegramBtn.style.opacity = '1';
+            sendToTelegramBtn.style.cursor = 'pointer';
+          }
+        });
+
+        // Hide button if no user_id available (optional - you can remove this to always show button)
+        // const userId = getTelegramUserId();
+        // if(!userId){
+        //   sendToTelegramBtn.style.display = 'none';
+        // }
+      })();
+    </script>
+  </body>
+</html>

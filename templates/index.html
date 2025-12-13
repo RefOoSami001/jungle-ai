@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>AI Quiz Generator</title>
+    <link rel="stylesheet" href="/static/styles.css">
+  </head>
+  <body>
+    <div class="container">
+      <div class="topbar">
+        <div class="brand">
+          <div class="logo">QG</div>
+          <p>RefOo Quiz Generator</p>
+        </div>
+      </div>
+      <div style="height:24px"></div>
+
+      {% if error %}
+        <div class="card" style="border-left:4px solid var(--danger);margin-bottom:12px">{{ error }}</div>
+      {% endif %}
+
+      <div class="card">
+        <form method="post" action="/generate" enctype="multipart/form-data" id="quiz-form">
+          <div class="form-grid">
+            <div>
+              <label class="small">Input Material method:</label>
+              <div class="segmented" role="radiogroup" style="margin-bottom:16px">
+                <label class="seg-item"><input type="radio" name="input_method" value="text" checked><span>Text</span></label>
+                <label class="seg-item"><input type="radio" name="input_method" value="file"><span>File Upload</span></label>
+              </div>
+
+              <!-- Text Input Section -->
+              <div id="text-input-section">
+                <label class="small">Paste your topic text:</label>
+                <textarea name="topic_text" id="topic-text" class="input" rows="8"></textarea>
+              </div>
+
+              <!-- File Upload Section -->
+              <div id="file-input-section" style="display:none">
+                <label class="small">Upload file (PDF or Word):</label>
+                <div style="margin-bottom:12px">
+                  <input type="file" name="file" id="file-input" accept=".pdf,.doc,.docx" style="display:none">
+                  <label for="file-input" class="btn ghost" style="display:inline-block;cursor:pointer;margin-bottom:8px">
+                    Choose File
+                  </label>
+                  <span id="file-name" style="margin-left:12px;color:var(--muted);font-size:14px"></span>
+                </div>
+                
+                <div id="page-range-container" style="display:none;margin-bottom:12px;padding:12px;background:rgba(16,24,40,0.02);border-radius:6px;border:1px solid rgba(16,24,40,0.04)">
+                  <label class="small">Page Range (optional):</label>
+                  <div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap">
+                    <input type="number" name="page_start" id="page-start" min="1" placeholder="Start" class="input" style="width:100px">
+                    <span style="color:var(--muted)">to</span>
+                    <input type="number" name="page_end" id="page-end" min="1" placeholder="End" class="input" style="width:100px">
+                    <span id="total-pages" style="color:var(--muted);font-size:13px"></span>
+                  </div>
+                  <div id="page-range-error" style="margin-top:8px;color:var(--danger);font-size:13px;display:none"></div>
+                </div>
+              </div>
+
+              <div style="margin-top:18px">
+                <label class="small">Question types</label>
+                <div class="question-types">
+                  <div class="segmented" role="radiogroup">
+                    <label class="seg-item"><input type="radio" name="question_type" value="Multiple Choice Question" checked><span>MCQ</span></label>
+                    <label class="seg-item"><input type="radio" name="question_type" value="Case Scenario Multiple Choice Question"><span>CASE</span></label>
+                    <label class="seg-item"><input type="radio" name="question_type" value="Understanding Question"><span>Open</span></label>
+                    <label class="seg-item"><input type="radio" name="question_type" value="True/False Question"><span>T/F</span></label>
+                  </div>
+                </div>
+              </div>
+
+              <div style="display:flex;gap:12px;margin-top:18px;align-items:center;flex-wrap:wrap">
+                <div style="flex:1">
+                  <label class="small">Amount of questions</label>
+                      <div class="segmented" role="radiogroup">
+                        <label class="seg-item"><input type="radio" name="amount" value="low" checked><span>Low</span></label>
+                        <label class="seg-item"><input type="radio" name="amount" value="medium"><span>Medium</span></label>
+                        <label class="seg-item"><input type="radio" name="amount" value="high"><span>High</span></label>
+                      </div>
+                </div>
+                <div style="min-width:160px">
+                  <label class="small">Difficulty</label>
+                  <div class="segmented" role="radiogroup">
+                    <label class="seg-item"><input type="radio" name="difficulty" value="Basic" checked><span>Basic</span></label>
+                    <label class="seg-item"><input type="radio" name="difficulty" value="Advanced"><span>Advanced</span></label>
+                  </div>
+                </div>
+              </div>
+
+              <div style="margin-top:18px" class="actions">
+                <button class="btn" type="submit" style="width:100%">Generate Quiz</button>
+              </div>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <script>
+      (function(){
+        const fileInput = document.getElementById('file-input');
+        const fileName = document.getElementById('file-name');
+        const pageRangeContainer = document.getElementById('page-range-container');
+        const pageStart = document.getElementById('page-start');
+        const pageEnd = document.getElementById('page-end');
+        const totalPages = document.getElementById('total-pages');
+        const pageRangeError = document.getElementById('page-range-error');
+        const topicText = document.getElementById('topic-text');
+        const form = document.getElementById('quiz-form');
+        const textInputSection = document.getElementById('text-input-section');
+        const fileInputSection = document.getElementById('file-input-section');
+        const inputMethodRadios = document.querySelectorAll('input[name="input_method"]');
+        
+        let maxPages = null;
+        let isPDF = false;
+
+        // Handle input method switching
+        inputMethodRadios.forEach(radio => {
+          radio.addEventListener('change', function(){
+            if(this.value === 'text'){
+              textInputSection.style.display = 'block';
+              fileInputSection.style.display = 'none';
+              // Clear file input
+              fileInput.value = '';
+              fileName.textContent = '';
+              pageRangeContainer.style.display = 'none';
+              maxPages = null;
+            } else {
+              textInputSection.style.display = 'none';
+              fileInputSection.style.display = 'block';
+              // Clear text input
+              topicText.value = '';
+            }
+          });
+        });
+
+        // Get PDF page count client-side
+        function getPDFPageCount(file, callback){
+          const reader = new FileReader();
+          reader.onload = function(e){
+            try{
+              const typedArray = new Uint8Array(e.target.result);
+              // Simple PDF page count extraction
+              const pdfString = new TextDecoder('latin1').decode(typedArray);
+              const pageMatches = pdfString.match(/\/Count\s+(\d+)/g);
+              if(pageMatches){
+                const counts = pageMatches.map(m => parseInt(m.match(/\d+/)[0]));
+                const maxCount = Math.max(...counts);
+                if(maxCount > 0) callback(maxCount);
+                else callback(null);
+              } else {
+                // Fallback: count /Type/Page occurrences
+                const pageOccurrences = (pdfString.match(/\/Type\s*\/Page[^s]/g) || []).length;
+                if(pageOccurrences > 0) callback(pageOccurrences);
+                else callback(null);
+              }
+            } catch(err){
+              console.error('Error reading PDF:', err);
+              callback(null);
+            }
+          };
+          reader.readAsArrayBuffer(file);
+        }
+
+        // Validate page range
+        function validatePageRange(){
+          const start = pageStart.value ? parseInt(pageStart.value) : null;
+          const end = pageEnd.value ? parseInt(pageEnd.value) : null;
+          let error = '';
+
+          if(start !== null && start < 1){
+            error = 'Start page must be at least 1';
+          } else if(end !== null && end < 1){
+            error = 'End page must be at least 1';
+          } else if(start !== null && end !== null && start > end){
+            error = 'Start page must be less than or equal to end page';
+          } else if(maxPages !== null){
+            if(start !== null && start > maxPages){
+              error = 'Start page cannot exceed ' + maxPages + ' pages';
+            } else if(end !== null && end > maxPages){
+              error = 'End page cannot exceed ' + maxPages + ' pages';
+            }
+          }
+
+          if(error){
+            pageRangeError.textContent = error;
+            pageRangeError.style.display = 'block';
+            return false;
+          } else {
+            pageRangeError.style.display = 'none';
+            return true;
+          }
+        }
+
+        fileInput.addEventListener('change', function(e){
+          const file = e.target.files[0];
+          if(file){
+            fileName.textContent = file.name;
+            isPDF = file.name.toLowerCase().endsWith('.pdf');
+            const isWord = file.name.toLowerCase().endsWith('.doc') || file.name.toLowerCase().endsWith('.docx');
+            
+            if(isPDF || isWord){
+              pageRangeContainer.style.display = 'block';
+              maxPages = null;
+              
+              if(isPDF){
+                // Try to get page count from PDF
+                getPDFPageCount(file, function(pageCount){
+                  if(pageCount){
+                    maxPages = pageCount;
+                    totalPages.textContent = '(Max: ' + pageCount + ' pages)';
+                    // Set max attribute
+                    pageStart.setAttribute('max', pageCount);
+                    pageEnd.setAttribute('max', pageCount);
+                    // Validate if values are already set
+                    validatePageRange();
+                  } else {
+                    totalPages.textContent = '(Page count will be determined after upload)';
+                  }
+                });
+              } else {
+                totalPages.textContent = '';
+                pageStart.removeAttribute('max');
+                pageEnd.removeAttribute('max');
+              }
+              
+              // Clear previous values and validate
+              pageStart.value = '';
+              pageEnd.value = '';
+              pageRangeError.style.display = 'none';
+            } else {
+              pageRangeContainer.style.display = 'none';
+              maxPages = null;
+            }
+          } else {
+            fileName.textContent = '';
+            pageRangeContainer.style.display = 'none';
+            maxPages = null;
+          }
+        });
+
+        // Validate on input
+        pageStart.addEventListener('input', validatePageRange);
+        pageStart.addEventListener('blur', validatePageRange);
+        pageEnd.addEventListener('input', validatePageRange);
+        pageEnd.addEventListener('blur', validatePageRange);
+
+        // Form submission validation
+        form.addEventListener('submit', function(e){
+          const selectedMethod = document.querySelector('input[name="input_method"]:checked').value;
+          
+          if(selectedMethod === 'file'){
+            if(!fileInput.files || fileInput.files.length === 0){
+              e.preventDefault();
+              alert('Please select a file to upload');
+              return false;
+            }
+            
+            // Validate page range if visible
+            if(pageRangeContainer.style.display !== 'none'){
+              if(!validatePageRange()){
+                e.preventDefault();
+                return false;
+              }
+            }
+          } else {
+            if(!topicText.value.trim()){
+              e.preventDefault();
+              alert('Please enter some text or upload a file');
+              return false;
+            }
+          }
+        });
+      })();
+    </script>
+  </body>
+</html>
