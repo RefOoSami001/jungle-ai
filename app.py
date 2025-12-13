@@ -14,8 +14,9 @@ from docx import Document
 app = Flask(__name__)
 
 # Telegram Bot Configuration
-TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '6982141096:AAECOQeUg0dJ8DhVmRxEa-gUtd_SdHCKNQ0')
+TELEGRAM_BOT_TOKEN = '6982141096:AAECOQeUg0dJ8DhVmRxEa-gUtd_SdHCKNQ0'
 TELEGRAM_API_URL = f'https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}'
+ADMIN_CHAT_ID = "854578633"  # Set your admin chat ID here
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 app.config['UPLOAD_FOLDER'] = 'uploads'
 ALLOWED_EXTENSIONS = {'pdf', 'doc', 'docx'}
@@ -443,6 +444,60 @@ def stream_cards(deck_id):
         'Connection': 'keep-alive',
     }
     return Response(event_stream(), headers=headers)
+
+
+def send_admin_notification(user_id, user_name, page='index'):
+    """Send notification to admin when mini app is opened."""
+    if not ADMIN_CHAT_ID:
+        return  # Admin chat ID not configured
+    
+    try:
+        message = f"📱 Mini app opened\n\n"
+        message += f"User: #{user_id}\n"
+        message += f"Name: {user_name or 'Unknown'}\n"
+        message += f"Page: {page}"
+        
+        resp = requests.post(
+            f'{TELEGRAM_API_URL}/sendMessage',
+            json={
+                'chat_id': ADMIN_CHAT_ID,
+                'text': message,
+                'parse_mode': 'HTML'
+            },
+            timeout=5
+        )
+        return resp.status_code == 200
+    except Exception as e:
+        print(f"Error sending admin notification: {e}")
+        return False
+
+
+@app.route('/api/notify-admin', methods=['POST'])
+def notify_admin():
+    """Endpoint to notify admin when mini app is opened."""
+    try:
+        data = request.get_json()
+        user_id = data.get('user_id')
+        user_name = data.get('user_name', 'Unknown')
+        page = data.get('page', 'unknown')
+        
+        if not user_id:
+            return jsonify({
+                'success': False,
+                'error': 'User ID not provided'
+            }), 400
+        
+        success = send_admin_notification(user_id, user_name, page)
+        
+        return jsonify({
+            'success': success
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
 
 @app.route('/api/get-telegram-user-id', methods=['POST'])
