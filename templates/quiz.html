@@ -14,6 +14,12 @@
           <div class="logo">QG</div>
           <p>RefOo Quiz Generator</p>
         </div>
+        <a href="/" class="btn ghost" style="margin-left:auto;flex-shrink:0;padding:8px 16px;font-size:14px;text-decoration:none;display:inline-flex;align-items:center;gap:6px">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M19 12H5M12 19l-7-7 7-7"/>
+          </svg>
+          <span>Return</span>
+        </a>
       </div>
       <div id="deck-id" style="display:none">{{ deck_id }}</div>
 
@@ -94,7 +100,29 @@
                 const inner = document.createElement('div'); inner.className='option-inner';
                 const txtdiv = document.createElement('div'); txtdiv.className='option-text'; txtdiv.textContent = opt;
                 inner.appendChild(txtdiv);
+                
+                // Add icon containers for checkmark/X (both, but only show when needed)
+                const checkIcon = document.createElement('div');
+                checkIcon.className = 'option-icon check-icon';
+                checkIcon.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+                
+                const xIcon = document.createElement('div');
+                xIcon.className = 'option-icon x-icon';
+                xIcon.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
+                
+                inner.appendChild(checkIcon);
+                inner.appendChild(xIcon);
+                
                 lab.appendChild(inner);
+
+                // Add click animation
+                lab.addEventListener('click', function(e){
+                  if(lab.dataset.locked) return;
+                  inner.classList.add('animating');
+                  setTimeout(() => {
+                    inner.classList.remove('animating');
+                  }, 400);
+                });
 
                 // immediate validation when user selects an option
                 inp.addEventListener('change', function(e){
@@ -119,19 +147,70 @@
                   const selectedValue = e.target.value;
                   const isCorrect = selectedValue === (c.answer || '');
 
-                  // clear any previous highlights
-                  wrapper.querySelectorAll('.option-inner').forEach(el=>el.classList.remove('correct','incorrect'));
+                  // clear any previous highlights and icons
+                  wrapper.querySelectorAll('.option-inner').forEach(el=>{
+                    el.classList.remove('correct','incorrect');
+                    el.querySelectorAll('.option-icon').forEach(icon=>{
+                      icon.style.opacity = '0';
+                      icon.style.transform = 'translateY(-50%) scale(0)';
+                      icon.style.display = 'flex';
+                    });
+                  });
 
-                  if(isCorrect){
-                    const chosenInner = e.target.closest('.option').querySelector('.option-inner');
-                    if(chosenInner) chosenInner.classList.add('correct');
-                  } else {
-                    const chosenInner = e.target.closest('.option').querySelector('.option-inner');
-                    if(chosenInner) chosenInner.classList.add('incorrect');
-                    // highlight correct one
-                    const correctInput = Array.from(wrapper.querySelectorAll('input[name=answer]')).find(i=>i.value === (c.answer || ''));
-                    if(correctInput){ const corrInner = correctInput.closest('.option').querySelector('.option-inner'); if(corrInner) corrInner.classList.add('correct'); }
-                  }
+                  // Add slight delay for better animation effect
+                  setTimeout(() => {
+                    if(isCorrect){
+                      const chosenInner = e.target.closest('.option').querySelector('.option-inner');
+                      if(chosenInner){
+                        chosenInner.classList.add('correct');
+                        const checkIcon = chosenInner.querySelector('.check-icon');
+                        const xIcon = chosenInner.querySelector('.x-icon');
+                        if(checkIcon){
+                          checkIcon.style.opacity = '1';
+                          checkIcon.style.transform = 'translateY(-50%) scale(1)';
+                          checkIcon.style.display = 'flex';
+                        }
+                        if(xIcon){
+                          xIcon.style.display = 'none';
+                        }
+                      }
+                    } else {
+                      const chosenInner = e.target.closest('.option').querySelector('.option-inner');
+                      if(chosenInner){
+                        chosenInner.classList.add('incorrect');
+                        const checkIcon = chosenInner.querySelector('.check-icon');
+                        const xIcon = chosenInner.querySelector('.x-icon');
+                        if(xIcon){
+                          xIcon.style.opacity = '1';
+                          xIcon.style.transform = 'translateY(-50%) scale(1)';
+                          xIcon.style.display = 'flex';
+                        }
+                        if(checkIcon){
+                          checkIcon.style.display = 'none';
+                        }
+                      }
+                      // highlight correct one with delay
+                      setTimeout(() => {
+                        const correctInput = Array.from(wrapper.querySelectorAll('input[name=answer]')).find(i=>i.value === (c.answer || ''));
+                        if(correctInput){
+                          const corrInner = correctInput.closest('.option').querySelector('.option-inner');
+                          if(corrInner){
+                            corrInner.classList.add('correct');
+                            const checkIcon = corrInner.querySelector('.check-icon');
+                            const xIcon = corrInner.querySelector('.x-icon');
+                            if(checkIcon){
+                              checkIcon.style.opacity = '1';
+                              checkIcon.style.transform = 'translateY(-50%) scale(1)';
+                              checkIcon.style.display = 'flex';
+                            }
+                            if(xIcon){
+                              xIcon.style.display = 'none';
+                            }
+                          }
+                        }
+                      }, 200);
+                    }
+                  }, 50);
 
                   // show answer text if an answer block exists (only for understanding cards)
                   if(ansDivLocal){
