@@ -5,6 +5,7 @@ import uuid
 import random
 import json
 import os
+from urllib.parse import parse_qs, unquote
 from werkzeug.utils import secure_filename
 import PyPDF2
 import pdfplumber
@@ -442,6 +443,49 @@ def stream_cards(deck_id):
         'Connection': 'keep-alive',
     }
     return Response(event_stream(), headers=headers)
+
+
+@app.route('/api/get-telegram-user-id', methods=['POST'])
+def get_telegram_user_id():
+    """Extract user ID from Telegram WebApp initData."""
+    try:
+        data = request.get_json()
+        init_data = data.get('initData', '')
+        
+        if not init_data:
+            return jsonify({
+                'success': False,
+                'error': 'No initData provided'
+            }), 400
+        
+        # Parse initData (format: key1=value1&key2=value2)
+        params = parse_qs(init_data)
+        
+        # Get user parameter
+        user_param = params.get('user', [None])[0]
+        if user_param:
+            try:
+                import json
+                user_data = json.loads(unquote(user_param))
+                user_id = user_data.get('id')
+                if user_id:
+                    return jsonify({
+                        'success': True,
+                        'user_id': str(user_id)
+                    })
+            except (json.JSONDecodeError, KeyError) as e:
+                pass
+        
+        return jsonify({
+            'success': False,
+            'error': 'Could not extract user ID from initData'
+        }), 400
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
 
 @app.route('/api/send-to-telegram', methods=['POST'])
