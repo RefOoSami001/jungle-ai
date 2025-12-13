@@ -13,6 +13,14 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
+# Try to use gevent for non-blocking sleep
+try:
+    from gevent import sleep as gevent_sleep
+    USE_GEVENT_SLEEP = True
+except ImportError:
+    USE_GEVENT_SLEEP = False
+    gevent_sleep = None
+
 import config
 import text_extraction
 import utils
@@ -406,6 +414,7 @@ def stream_cards(deck_id):
     - Sends heartbeat messages to keep connection alive
     - Limits maximum stream duration
     - Cleans up resources properly
+    - Uses gevent.sleep for non-blocking sleep if available
     """
     user_id = request.args.get('user_id', config.DEFAULT_USER_ID)
     
@@ -451,9 +460,14 @@ def stream_cards(deck_id):
                             yield ': heartbeat\n\n'
                             last_heartbeat = current_time
                         
-                        # Use threading.Event for non-blocking sleep simulation
-                        # This prevents Gunicorn worker timeout
-                        time.sleep(min(config.STREAM_POLL_INTERVAL, 2.0))
+                        # Use non-blocking sleep
+                        sleep_time = min(config.STREAM_POLL_INTERVAL, 2.0)
+                        if USE_GEVENT_SLEEP:
+                            gevent_sleep(sleep_time)
+                        else:
+                            # For sync workers, yield frequently to prevent timeout
+                            yield ': keepalive\n\n'
+                            time.sleep(min(sleep_time, 0.5))
                         continue
                     
                     normalized = []
@@ -502,7 +516,13 @@ def stream_cards(deck_id):
                         yield 'data: {"reason": "max_idle"}\n\n'
                         break
                     
-                    time.sleep(min(config.STREAM_POLL_INTERVAL, 2.0))
+                    # Use non-blocking sleep
+                    sleep_time = min(config.STREAM_POLL_INTERVAL, 2.0)
+                    if USE_GEVENT_SLEEP:
+                        gevent_sleep(sleep_time)
+                    else:
+                        yield ': keepalive\n\n'
+                        time.sleep(min(sleep_time, 0.5))
                     continue
                     
                 except Exception as e:
@@ -525,8 +545,14 @@ def stream_cards(deck_id):
                     yield 'data: {"reason": "max_idle"}\n\n'
                     break
 
-                # Use shorter sleep intervals to prevent worker timeout
-                time.sleep(min(config.STREAM_POLL_INTERVAL, 2.0))
+                # Use non-blocking sleep to prevent worker timeout
+                sleep_time = min(config.STREAM_POLL_INTERVAL, 2.0)
+                if USE_GEVENT_SLEEP:
+                    gevent_sleep(sleep_time)
+                else:
+                    # Yield keepalive and use shorter sleep for sync workers
+                    yield ': keepalive\n\n'
+                    time.sleep(min(sleep_time, 0.5))
                 
         except GeneratorExit:
             # Client disconnected, cleanup
