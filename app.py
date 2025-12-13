@@ -1,319 +1,231 @@
-from flask import Flask, render_template, request, redirect, url_for, jsonify, Response
-import requests
+"""Main Flask application for Quiz Generator."""
+import json
+import logging
+import os
 import time
 import uuid
-import random
-import json
-import os
+from contextlib import contextmanager
 from urllib.parse import parse_qs, unquote
-from werkzeug.utils import secure_filename
-import PyPDF2
-import pdfplumber
-from docx import Document
+from typing import Dict, List, Optional, Tuple
+
+from flask import Flask, Response, jsonify, redirect, render_template, request, url_for
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
+import config
+import text_extraction
+import utils
 from upload_file import upload_pdf_to_s3
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+# Try to import telebot
+try:
+    import telebot
+    from telebot import apihelper
+    TELEBOT_AVAILABLE = True
+except ImportError:
+    TELEBOT_AVAILABLE = False
+    logger.warning("pyTelegramBotAPI not installed. Telegram poll feature will be disabled.")
 
 app = Flask(__name__)
 
-# Telegram Bot Configuration
-TELEGRAM_BOT_TOKEN = '6982141096:AAECOQeUg0dJ8DhVmRxEa-gUtd_SdHCKNQ0'
-TELEGRAM_API_URL = f'https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}'
-ADMIN_CHAT_ID = "854578633"  # Set your admin chat ID here
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
-app.config['UPLOAD_FOLDER'] = 'uploads'
-ALLOWED_EXTENSIONS = {'pdf', 'doc', 'docx'}
+# Flask configuration
+app.config['MAX_CONTENT_LENGTH'] = config.MAX_CONTENT_LENGTH
+app.config['UPLOAD_FOLDER'] = config.UPLOAD_FOLDER
 
 # Create uploads directory if it doesn't exist
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
-HEADERS = {
-    'accept': '*/*',
-    'accept-language': 'ar-EG,ar;q=0.9,en-US;q=0.8,en;q=0.7',
-    'content-type': 'application/json',
-    'origin': 'https://app.jungleai.com',
-    'priority': 'u=1, i',
-    'referer': 'https://app.jungleai.com/',
-    'sec-ch-ua': '"Google Chrome";v="143", "Chromium";v="143", "Not A(Brand";v="24"',
-    'sec-ch-ua-mobile': '?0',
-    'sec-ch-ua-platform': '"Windows"',
-    'sec-fetch-dest': 'empty',
-    'sec-fetch-mode': 'cors',
-    'sec-fetch-site': 'same-site',
-    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36',
-}
-
-# Replace this with a real user_id if you have one
-DEFAULT_USER_ID = '2ih2TpB168QyRBl8mfxBeiGjqD83'
-
-
-def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
-
-
-def extract_text_from_pdf(file_path, start_page=None, end_page=None):
-    """Extract text from PDF file, optionally with page range."""
-    text_parts = []
-    total_pages = 0
-    pages_with_text = 0
-    pages_processed = 0
-    
+# Initialize Telegram bot if available
+bot = None
+if TELEBOT_AVAILABLE and config.TELEGRAM_BOT_TOKEN:
     try:
-        # Try pdfplumber first (better text extraction)
-        with pdfplumber.open(file_path) as pdf:
-            total_pages = len(pdf.pages)
-            start = (start_page - 1) if start_page else 0
-            end = end_page if end_page else total_pages
-            
-            # Ensure valid range
-            start = max(0, min(start, total_pages - 1))
-            end = max(start + 1, min(end, total_pages))
-            
-            for i in range(start, end):
-                pages_processed += 1
-                try:
-                    page = pdf.pages[i]
-                    # Try multiple extraction methods
-                    page_text = page.extract_text()
-                    
-                    # If no text, try extracting tables and other content
-                    if not page_text or not page_text.strip():
-                        # Try extracting tables
-                        tables = page.extract_tables()
-                        if tables:
-                            for table in tables:
-                                table_text = '\n'.join([' | '.join([str(cell) if cell else '' for cell in row]) for row in table])
-                                if table_text.strip():
-                                    page_text = (page_text or '') + '\n' + table_text
-                    
-                    # Try alternative extraction method
-                    if not page_text or not page_text.strip():
-                        page_text = page.extract_text(layout=True)
-                    
-                    if page_text and page_text.strip():
-                        text_parts.append(page_text.strip())
-                        pages_with_text += 1
-                except Exception as page_error:
-                    # Continue with next page if one page fails
-                    print(f"Warning: Failed to extract text from page {i+1}: {page_error}")
-                    continue
-                    
+        bot = telebot.TeleBot(config.TELEGRAM_BOT_TOKEN)
+        # Set longer timeout for bot operations
+        apihelper.SESSION_TIMEOUT = 30
+        logger.info("Telegram bot initialized successfully")
     except Exception as e:
-        # Fallback to PyPDF2
+        logger.error(f"Failed to initialize Telegram bot: {e}")
+        bot = None
+
+# Create a requests session with connection pooling and retry strategy
+# This improves performance and reduces connection overhead
+session = requests.Session()
+retry_strategy = Retry(
+    total=3,
+    backoff_factor=0.3,
+    status_forcelist=[429, 500, 502, 503, 504],
+    allowed_methods=["POST", "GET"]
+)
+adapter = HTTPAdapter(
+    max_retries=retry_strategy,
+    pool_connections=10,
+    pool_maxsize=20
+)
+session.mount("http://", adapter)
+session.mount("https://", adapter)
+
+
+def validate_page_range(start_page: Optional[int], end_page: Optional[int], 
+                       total_pages: int) -> Tuple[bool, Optional[str]]:
+    """Validate page range against total pages.
+    
+    Returns:
+        Tuple of (is_valid, error_message)
+    """
+    if start_page is not None and start_page < 1:
+        return False, 'Start page must be at least 1'
+    if end_page is not None and end_page < 1:
+        return False, 'End page must be at least 1'
+    if start_page is not None and end_page is not None and start_page > end_page:
+        return False, 'Start page must be less than or equal to end page'
+    if start_page is not None and start_page > total_pages:
+        return False, f'Start page ({start_page}) exceeds total pages ({total_pages})'
+    if end_page is not None and end_page > total_pages:
+        return False, f'End page ({end_page}) exceeds total pages ({total_pages})'
+    return True, None
+
+
+@contextmanager
+def _file_cleanup(file_path: Optional[str]):
+    """Context manager to ensure file cleanup."""
+    try:
+        yield
+    finally:
+        if file_path:
+            utils.safe_remove_file(file_path)
+
+
+def _parse_page_range() -> Tuple[Optional[int], Optional[int]]:
+    """Parse and validate page range from form data."""
+    page_start = request.form.get('page_start', '').strip()
+    page_end = request.form.get('page_end', '').strip()
+    start_page = int(page_start) if page_start and page_start.isdigit() else None
+    end_page = int(page_end) if page_end and page_end.isdigit() else None
+    return start_page, end_page
+
+
+def _extract_text_from_file(file_path: str, filename: str, 
+                            start_page: Optional[int], 
+                            end_page: Optional[int]) -> Tuple[str, int]:
+    """Extract text from file based on file type."""
+    filename_lower = filename.lower()
+    if filename_lower.endswith('.pdf'):
+        return text_extraction.extract_text_from_pdf(file_path, start_page, end_page)
+    elif filename_lower.endswith(('.doc', '.docx')):
+        return text_extraction.extract_text_from_word(file_path, start_page, end_page)
+    else:
+        raise ValueError('Unsupported file type')
+
+
+def process_file_upload(file, user_id: str) -> Tuple[bool, Dict]:
+    """Process uploaded file: extract text and upload to S3.
+    
+    Returns:
+        Tuple of (success, result_dict)
+        result_dict contains: extracted_text, total_pages, s3_object_key, s3_url, 
+                              filename, content_type, start_page, end_page
+    """
+    if not file or not file.filename or not utils.allowed_file(file.filename):
+        return False, {'error': 'Please select a valid PDF or Word file'}
+    
+    file_path = utils.get_secure_file_path(file.filename, app.config['UPLOAD_FOLDER'])
+    
+    with _file_cleanup(file_path):
         try:
-            with open(file_path, 'rb') as file:
-                pdf_reader = PyPDF2.PdfReader(file)
-                total_pages = len(pdf_reader.pages)
-                start = (start_page - 1) if start_page else 0
-                end = end_page if end_page else total_pages
-                
-                start = max(0, min(start, total_pages - 1))
-                end = max(start + 1, min(end, total_pages))
-                
-                for i in range(start, end):
-                    pages_processed += 1
-                    try:
-                        page = pdf_reader.pages[i]
-                        page_text = page.extract_text()
-                        if page_text and page_text.strip():
-                            text_parts.append(page_text.strip())
-                            pages_with_text += 1
-                    except Exception as page_error:
-                        print(f"Warning: Failed to extract text from page {i+1}: {page_error}")
-                        continue
-        except Exception as e2:
-            raise Exception(f"Failed to extract PDF text: {str(e2)}")
-    
-    # Check if we got any text
-    if not text_parts:
-        error_msg = f"No text could be extracted from the PDF"
-        if pages_processed > 0:
-            error_msg += f" (processed {pages_processed} page{'s' if pages_processed > 1 else ''})"
-        error_msg += ". The PDF might be image-based (scanned) or encrypted. Please ensure the PDF contains selectable text."
-        raise Exception(error_msg)
-    
-    # Warn if some pages had no text
-    if pages_with_text < pages_processed:
-        print(f"Warning: Only {pages_with_text} out of {pages_processed} pages contained extractable text")
-    
-    return '\n\n'.join(text_parts), total_pages
-
-
-def extract_text_from_word(file_path, start_page=None, end_page=None):
-    """Extract text from Word document. Note: Word doesn't have clear page boundaries,
-    so we approximate by paragraphs."""
-    try:
-        doc = Document(file_path)
-        paragraphs = [para.text for para in doc.paragraphs if para.text.strip()]
-        
-        # For Word docs, we approximate pages as ~50 paragraphs per page
-        # This is a rough estimate
-        estimated_pages = max(1, len(paragraphs) // 50)
-        
-        if start_page or end_page:
-            # Approximate page boundaries
-            paras_per_page = max(1, len(paragraphs) // estimated_pages) if estimated_pages > 0 else len(paragraphs)
-            start_idx = (start_page - 1) * paras_per_page if start_page else 0
-            end_idx = end_page * paras_per_page if end_page else len(paragraphs)
-            paragraphs = paragraphs[start_idx:end_idx]
-        
-        return '\n\n'.join(paragraphs), estimated_pages
-    except Exception as e:
-        raise Exception(f"Failed to extract Word text: {str(e)}")
-
-
-def build_question_types(selected_types, difficulty='Advanced'):
-    mapping = {
-        'Multiple Choice Question': 'Multiple Choice Question',
-        'Understanding Question': 'Understanding Question',
-        'Case Scenario Multiple Choice Question': 'Case Scenario Multiple Choice Question',
-        'True/False Question': 'True/False Question',
-    }
-    out = []
-    for t in selected_types:
-        if t in mapping:
-            out.append({'cardType': mapping[t], 'difficultyGroup': difficulty})
-    return out
-
-
-@app.route('/')
-def index():
-    quiz_id = request.args.get('quiz_id', '').strip()
-    if quiz_id:
-        # Redirect to quiz page if quiz_id is provided
-        return redirect(url_for('view_deck', deck_id=quiz_id))
-    return render_template('index.html')
-
-
-@app.route('/generate', methods=['POST'])
-def generate():
-    amount = request.form.get('amount', 'low')
-    difficulty = request.form.get('difficulty', 'Advanced')
-    types = request.form.getlist('question_type')
-    user_id = request.form.get('user_id', DEFAULT_USER_ID)
-    
-    # Handle file upload
-    uploaded_file = None
-    file_path = None
-    extracted_text = ''
-    s3_object_key = None
-    s3_url = None
-    total_pages = 0
-    filename = ''
-    start_page = None
-    end_page = None
-    
-    if 'file' in request.files:
-        file = request.files['file']
-        if file and file.filename and allowed_file(file.filename):
-            filename = secure_filename(file.filename)
-            file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            # Save uploaded file
             file.save(file_path)
-            uploaded_file = file
             
-            # Get page range if provided
-            page_start = request.form.get('page_start', '').strip()
-            page_end = request.form.get('page_end', '').strip()
+            # Parse page range
+            start_page, end_page = _parse_page_range()
             
-            # Validate and parse page range
-            if page_start and page_start.isdigit():
-                start_page = int(page_start)
-                if start_page < 1:
-                    if os.path.exists(file_path):
-                        os.remove(file_path)
-                    return render_template('index.html', error='Start page must be at least 1')
+            # Get total pages for validation
+            filename_lower = file_path.lower()
+            if filename_lower.endswith('.pdf'):
+                total_pages = text_extraction.get_pdf_page_count(file_path)
+                if total_pages == 0:
+                    return False, {'error': 'Could not determine PDF page count'}
+            else:
+                # For Word docs, we'll estimate after extraction
+                total_pages = None
             
-            if page_end and page_end.isdigit():
-                end_page = int(page_end)
-                if end_page < 1:
-                    if os.path.exists(file_path):
-                        os.remove(file_path)
-                    return render_template('index.html', error='End page must be at least 1')
-            
-            # Validate start <= end if both are provided
-            if start_page is not None and end_page is not None and start_page > end_page:
-                if os.path.exists(file_path):
-                    os.remove(file_path)
-                return render_template('index.html', error='Start page must be less than or equal to end page')
+            # Validate page range if provided
+            if start_page is not None or end_page is not None:
+                if total_pages is None:
+                    # For Word docs, we need to estimate first
+                    _, estimated_pages = text_extraction.extract_text_from_word(file_path)
+                    total_pages = estimated_pages
+                
+                is_valid, error_msg = validate_page_range(start_page, end_page, total_pages)
+                if not is_valid:
+                    return False, {'error': error_msg}
             
             # Extract text based on file type
-            try:
-                if filename.lower().endswith('.pdf'):
-                    # First, get total pages to validate range
-                    try:
-                        with pdfplumber.open(file_path) as pdf:
-                            total_pages = len(pdf.pages)
-                    except:
-                        with open(file_path, 'rb') as f:
-                            pdf_reader = PyPDF2.PdfReader(f)
-                            total_pages = len(pdf_reader.pages)
-                    
-                    # Validate page range against total pages
-                    if start_page is not None and start_page > total_pages:
-                        if os.path.exists(file_path):
-                            os.remove(file_path)
-                        return render_template('index.html', error=f'Start page ({start_page}) exceeds total pages ({total_pages})')
-                    if end_page is not None and end_page > total_pages:
-                        if os.path.exists(file_path):
-                            os.remove(file_path)
-                        return render_template('index.html', error=f'End page ({end_page}) exceeds total pages ({total_pages})')
-                    
-                    extracted_text, total_pages = extract_text_from_pdf(file_path, start_page, end_page)
-                elif filename.lower().endswith(('.doc', '.docx')):
-                    extracted_text, total_pages = extract_text_from_word(file_path, start_page, end_page)
-                
-                if not extracted_text or not extracted_text.strip():
-                    if os.path.exists(file_path):
-                        os.remove(file_path)
-                    error_msg = 'No text could be extracted from the file. '
-                    if filename.lower().endswith('.pdf'):
-                        error_msg += 'The PDF might be image-based (scanned), encrypted, or the selected page range might be empty. Please ensure the PDF contains selectable text or try a different page range.'
-                    else:
-                        error_msg += 'Please check the file or page range.'
-                    return render_template('index.html', error=error_msg)
-                
-                # Upload file to S3 before cleanup
-                content_medium_type = 'PDF' if filename.lower().endswith('.pdf') else 'DOCX'
-                upload_result = upload_pdf_to_s3(file_path, user_id, content_medium_type)
-                
-                if not upload_result.get('success'):
-                    if os.path.exists(file_path):
-                        os.remove(file_path)
-                    return render_template('index.html', error=f'Failed to upload file to S3: {upload_result.get("error", "Unknown error")}')
-                
-                s3_object_key = upload_result.get('s3_object_key')
-                s3_url = upload_result.get('s3_url')
-                
-                # Clean up uploaded file after S3 upload
-                if os.path.exists(file_path):
-                    os.remove(file_path)
-            except Exception as e:
-                if os.path.exists(file_path):
-                    os.remove(file_path)
-                error_message = str(e)
-                # Provide more helpful error messages
-                if 'No text could be extracted' in error_message:
-                    return render_template('index.html', error=error_message)
-                elif 'Failed to extract' in error_message:
-                    return render_template('index.html', error=f'Error extracting text: {error_message}. The file might be corrupted or in an unsupported format.')
+            extracted_text, total_pages = _extract_text_from_file(
+                file_path, file_path, start_page, end_page
+            )
+            
+            if not extracted_text or not extracted_text.strip():
+                error_msg = 'No text could be extracted from the file. '
+                if filename_lower.endswith('.pdf'):
+                    error_msg += ('The PDF might be image-based (scanned), encrypted, '
+                                'or the selected page range might be empty. '
+                                'Please ensure the PDF contains selectable text or try a different page range.')
                 else:
-                    return render_template('index.html', error=f'Error processing file: {error_message}')
-    else:
-        return render_template('index.html', error='Please select a valid PDF or Word file')
-    
-    # Use extracted text from file
-    final_text = extracted_text
-    if not final_text:
-        return render_template('index.html', error='Please upload a file and ensure text can be extracted')
+                    error_msg += 'Please check the file or page range.'
+                return False, {'error': error_msg}
+            
+            # Upload file to S3
+            content_type = utils.get_content_type(file.filename)
+            upload_result = upload_pdf_to_s3(file_path, user_id, content_type)
+            
+            if not upload_result.get('success'):
+                error_msg = upload_result.get('error', 'Unknown error')
+                return False, {'error': f'Failed to upload file to S3: {error_msg}'}
+            
+            return True, {
+                'extracted_text': extracted_text,
+                'total_pages': total_pages,
+                's3_object_key': upload_result.get('s3_object_key'),
+                's3_url': upload_result.get('s3_url'),
+                'filename': file.filename,
+                'content_type': content_type,
+                'start_page': start_page,
+                'end_page': end_page,
+            }
+            
+        except ValueError as e:
+            return False, {'error': str(e)}
+        except Exception as e:
+            logger.error(f"Error processing file: {e}", exc_info=True)
+            error_message = str(e)
+            if 'No text could be extracted' in error_message:
+                return False, {'error': error_message}
+            elif 'Failed to extract' in error_message:
+                return False, {
+                    'error': (f'Error extracting text: {error_message}. '
+                             'The file might be corrupted or in an unsupported format.')
+                }
+            else:
+                return False, {'error': f'Error processing file: {error_message}'}
 
-    question_types = build_question_types(types, difficulty=difficulty)
-    
-    # Determine content type and file name
-    content_type = 'PDF' if filename.lower().endswith('.pdf') else 'DOCX'
-    original_filename = uploaded_file.filename if uploaded_file else filename
 
-    json_data = {
+def build_generation_payload(extracted_text: str, user_id: str, question_types: List[Dict],
+                            s3_url: str, s3_object_key: str, content_type: str,
+                            filename: str, total_pages: int, start_page: Optional[int],
+                            end_page: Optional[int], amount: str) -> Dict:
+    """Build JSON payload for generation API request."""
+    return {
         'should_run_generations_with_new_architecture': True,
-        'pdf_pages_text_array': [final_text],
-        'page_text_sentences_array': [final_text],
+        'pdf_pages_text_array': [extracted_text],
+        'page_text_sentences_array': [extracted_text],
         'page_url': s3_url or '',
         'page_title': '',
         'content_medium_type': content_type,
@@ -329,7 +241,7 @@ def generate():
         'did_user_input_url_for_pdf': False,
         'level_for_amount_of_cards_to_generate': amount,
         'selected_images_for_occlusion': [],
-        'pdf_file_name': original_filename,
+        'pdf_file_name': filename,
         'video_or_audio_starting_minute': 0,
         'video_or_audio_ending_minute': None,
         'video_or_audio_num_minutes': None,
@@ -338,213 +250,322 @@ def generate():
         'pdf_num_pages': total_pages,
         'didGetGeneratedWithMultipleUploadedDocuments': False,
     }
+
+
+def fetch_cards_from_api(deck_id: str, user_id: str, timeout: int = None) -> Tuple[bool, List]:
+    """Fetch cards from API for given deck_id.
+    
+    Args:
+        deck_id: Deck ID to fetch cards for
+        user_id: User ID
+        timeout: Request timeout in seconds (defaults to config.REQUEST_TIMEOUT)
+    
+    Returns:
+        Tuple of (success, cards_list)
+    """
+    if timeout is None:
+        timeout = config.REQUEST_TIMEOUT
+    
     try:
-        resp = requests.post(
-            'https://cbackend.jungleai.com/generate_content/run_all_generations_for_file_or_url',
-            headers=HEADERS,
-            json=json_data,
-            timeout=30,
+        response = session.post(
+            f'{config.CARDS_ENDPOINT}/{deck_id}',
+            headers=config.HEADERS,
+            json={'user_id': user_id},
+            timeout=timeout,
         )
-        resp.raise_for_status()
+        response.raise_for_status()
+        data = response.json()
+        cards = (data.get('all_cards_for_deck') or 
+                data.get('all_cards_for_deck_and_subdecks') or [])
+        return True, cards
+    except requests.exceptions.Timeout:
+        logger.warning(f"Timeout fetching cards for deck {deck_id}")
+        return False, []
+    except requests.exceptions.RequestException as e:
+        logger.warning(f"Failed to fetch cards for deck {deck_id}: {e}")
+        return False, []
     except Exception as e:
-        return render_template('index.html', error=f'Generation request failed: {e}')
+        logger.error(f"Unexpected error fetching cards: {e}", exc_info=True)
+        return False, []
 
-    deck_data_id = resp.json().get('deck_data_id')
-    if not deck_data_id:
-        return render_template('index.html', error='No deck id returned from generation API')
 
-    # Redirect to the deck view so the client always uses the same flow
-    return redirect(url_for('view_deck', deck_id=deck_data_id))
+@app.route('/')
+def index():
+    """Render index page or redirect to quiz if quiz_id provided."""
+    quiz_id = request.args.get('quiz_id', '').strip()
+    if quiz_id:
+        return redirect(url_for('view_deck', deck_id=quiz_id))
+    return render_template('index.html')
 
+
+@app.route('/generate', methods=['POST'])
+def generate():
+    """Handle quiz generation request."""
+    amount = request.form.get('amount', 'low')
+    difficulty = request.form.get('difficulty', 'Advanced')
+    types = request.form.getlist('question_type')
+    user_id = request.form.get('user_id', config.DEFAULT_USER_ID)
+    
+    # Process file upload
+    if 'file' not in request.files:
+        return render_template('index.html', error='Please select a valid PDF or Word file')
+    
+    file = request.files['file']
+    success, result = process_file_upload(file, user_id)
+    
+    if not success:
+        return render_template('index.html', error=result.get('error', 'Unknown error'))
+    
+    extracted_text = result['extracted_text']
+    if not extracted_text:
+        return render_template('index.html', error='Please upload a file and ensure text can be extracted')
+    
+    # Validate at least one question type is selected
+    if not types:
+        return render_template('index.html', error='Please select at least one question type')
+    
+    # Build question types
+    question_types = utils.build_question_types(types, difficulty=difficulty)
+    
+    if not question_types:
+        return render_template('index.html', error='Invalid question type selected')
+    
+    # Build generation payload
+    json_data = build_generation_payload(
+        extracted_text=extracted_text,
+        user_id=user_id,
+        question_types=question_types,
+        s3_url=result['s3_url'],
+        s3_object_key=result['s3_object_key'],
+        content_type=result['content_type'],
+        filename=result['filename'],
+        total_pages=result['total_pages'],
+        start_page=result['start_page'],
+        end_page=result['end_page'],
+        amount=amount,
+    )
+    
+    # Send generation request
+    try:
+        response = session.post(
+            config.GENERATE_ENDPOINT,
+            headers=config.HEADERS,
+            json=json_data,
+            timeout=config.REQUEST_TIMEOUT,
+        )
+        response.raise_for_status()
+        response_data = response.json()
+        deck_data_id = response_data.get('deck_data_id')
+        
+        if not deck_data_id:
+            logger.warning("No deck_id returned from generation API")
+            return render_template('index.html', 
+                                error='No deck id returned from generation API')
+        
+        return redirect(url_for('view_deck', deck_id=deck_data_id))
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Generation request failed: {e}", exc_info=True)
+        return render_template('index.html', 
+                            error=f'Generation request failed: {str(e)}')
+    except (ValueError, KeyError) as e:
+        logger.error(f"Invalid response from generation API: {e}", exc_info=True)
+        return render_template('index.html', 
+                            error='Invalid response from generation API')
 
 
 @app.route('/<deck_id>')
 def view_deck(deck_id):
-    """Render the quiz page for an existing deck id (direct link support).
-
-    Example: GET /eK6fVwO4KTa7cGDLdGmW will render the quiz page and the client
-    will open the SSE stream to `/stream_cards/<deck_id>` to receive cards.
-    """
+    """Render the quiz page for an existing deck id (direct link support)."""
     return render_template('quiz.html', cards=[], deck_id=deck_id)
-
 
 
 @app.route('/poll_cards/<deck_id>', methods=['GET'])
 def poll_cards(deck_id):
-    user_id = request.args.get('user_id', DEFAULT_USER_ID)
-    try:
-        cards_resp = requests.post(
-            f'https://cbackend.jungleai.com/cards/get_all_cards_data_for_deck_and_subdecks/{deck_id}',
-            headers=HEADERS,
-            json={'user_id': user_id},
-            timeout=30,
-        )
-        cards_resp.raise_for_status()
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-    data = cards_resp.json()
-    cards = data.get('all_cards_for_deck') or data.get('all_cards_for_deck_and_subdecks') or []
-
-    normalized = []
-    for c in cards:
-        options = []
-        answer = c.get('answer')
-        distractors = c.get('distractor_answers_for_multiple_choice_question') or []
-        if distractors:
-            options = distractors[:] + ([answer] if answer else [])
-            random.shuffle(options)
-        # handle True/False cards or cases where backend doesn't provide options
-        card_type = (c.get('card_type') or '')
-        ct_lower = str(card_type).lower()
-        if (not options) and (('true' in ct_lower) or ('false' in ct_lower)):
-            # standard True/False options
-            options = ['True', 'False']
-            # normalize answer to 'True'/'False' if possible
-            if isinstance(answer, bool):
-                answer = 'True' if answer else 'False'
-            elif isinstance(answer, str) and answer.strip().lower() in ('true', 'false'):
-                answer = 'True' if answer.strip().lower() == 'true' else 'False'
-        # if answer is literally True/False but no options were provided, expose T/F options
-        if (not options) and isinstance(answer, str) and answer.strip().lower() in ('true', 'false'):
-            options = ['True', 'False']
-        card_id = c.get('card_id') or c.get('id')
-        # attempt to surface explanation text for Understanding-type cards
-        explanation = c.get('explanation') or c.get('explanation_text') or c.get('detailed_answer') or c.get('solution') or answer
-        normalized.append({
-            'card_id': card_id,
-            'question': c.get('question'),
-            'case_details': c.get('case_scenario_details'),
-            'card_type': c.get('card_type'),
-            'answer': answer,
-            'explanation': explanation,
-            'options': options,
-            'raw': c,
-        })
-
+    """Poll cards endpoint for one-time card retrieval."""
+    user_id = request.args.get('user_id', config.DEFAULT_USER_ID)
+    success, cards = fetch_cards_from_api(deck_id, user_id)
+    
+    if not success:
+        return jsonify({'error': 'Failed to fetch cards'}), 500
+    
+    normalized = utils.normalize_cards(cards)
     return jsonify({'cards': normalized})
-
 
 
 @app.route('/stream_cards/<deck_id>')
 def stream_cards(deck_id):
     """Server-Sent Events stream that pushes new cards as they're available.
-
+    
     This creates a single long-lived connection to the browser. The server polls
     the backend for new cards and forwards only newly-seen cards to the client.
     When no new cards arrive for `max_idle` cycles the stream sends a `done`
     event and closes.
+    
+    Optimized to prevent worker timeouts and memory issues:
+    - Uses shorter timeouts for API requests
+    - Sends heartbeat messages to keep connection alive
+    - Limits maximum stream duration
+    - Cleans up resources properly
     """
-    user_id = request.args.get('user_id', DEFAULT_USER_ID)
+    user_id = request.args.get('user_id', config.DEFAULT_USER_ID)
+    
+    # Maximum stream duration in seconds (5 minutes)
+    MAX_STREAM_DURATION = 300
+    start_time = time.time()
+    
+    # Shorter timeout for streaming requests to prevent blocking
+    STREAM_REQUEST_TIMEOUT = 10
 
     def event_stream():
         seen = set()
         idle = 0
-        poll_interval = 2.0
-        max_idle = 30  # stop after ~max_idle * poll_interval seconds of inactivity
+        iteration = 0
+        last_heartbeat = time.time()
+        HEARTBEAT_INTERVAL = 15  # Send heartbeat every 15 seconds
 
-        while True:
-            try:
-                cards_resp = requests.post(
-                    f'https://cbackend.jungleai.com/cards/get_all_cards_data_for_deck_and_subdecks/{deck_id}',
-                    headers=HEADERS,
-                    json={'user_id': user_id},
-                    timeout=20,
-                )
-                cards_resp.raise_for_status()
-                data = cards_resp.json()
-                cards = data.get('all_cards_for_deck') or data.get('all_cards_for_deck_and_subdecks') or []
-
-                normalized = []
-                for c in cards:
-                    card_id = c.get('card_id') or c.get('id')
-                    if not card_id or card_id in seen:
-                        continue
-                    seen.add(card_id)
-                    options = []
-                    answer = c.get('answer')
-                    distractors = c.get('distractor_answers_for_multiple_choice_question') or []
-                    if distractors:
-                        options = distractors[:] + ([answer] if answer else [])
-                        random.shuffle(options)
-                    # handle True/False cards or cases where backend doesn't provide options
-                    card_type = (c.get('card_type') or '')
-                    ct_lower = str(card_type).lower()
-                    if (not options) and (('true' in ct_lower) or ('false' in ct_lower)):
-                        options = ['True', 'False']
-                        if isinstance(answer, bool):
-                            answer = 'True' if answer else 'False'
-                        elif isinstance(answer, str) and answer.strip().lower() in ('true', 'false'):
-                            answer = 'True' if answer.strip().lower() == 'true' else 'False'
-                    if (not options) and isinstance(answer, str) and answer.strip().lower() in ('true', 'false'):
-                        options = ['True', 'False']
-
-                    # attempt to surface explanation text for Understanding-type cards
-                    explanation = c.get('explanation') or c.get('explanation_text') or c.get('detailed_answer') or c.get('solution') or answer
-                    normalized.append({
-                        'card_id': card_id,
-                        'question': c.get('question'),
-                        'case_details': c.get('case_scenario_details'),
-                        'card_type': c.get('card_type'),
-                        'answer': answer,
-                        'explanation': explanation,
-                        'options': options,
-                    })
-
-                if normalized:
-                    payload = json.dumps({'cards': normalized})
-                    yield f'data: {payload}\n\n'
-                    idle = 0
-                else:
-                    idle += 1
-
-            except Exception as e:
-                # on error, send an error event and continue/pause
+        try:
+            while True:
+                # Check if stream has exceeded maximum duration
+                if time.time() - start_time > MAX_STREAM_DURATION:
+                    logger.info(f"Stream for deck {deck_id} exceeded max duration, closing")
+                    yield 'event: done\n'
+                    yield 'data: {"reason": "max_duration"}\n\n'
+                    break
+                
+                iteration += 1
+                
                 try:
-                    err = json.dumps({'error': str(e)})
-                    yield f'data: {err}\n\n'
-                except Exception:
-                    pass
-                idle += 1
+                    # Use shorter timeout for streaming to prevent blocking
+                    success, cards = fetch_cards_from_api(deck_id, user_id, timeout=STREAM_REQUEST_TIMEOUT)
+                    
+                    if not success:
+                        idle += 1
+                        if idle >= config.STREAM_MAX_IDLE:
+                            yield 'event: done\n'
+                            yield 'data: {"reason": "max_idle"}\n\n'
+                            break
+                        
+                        # Send heartbeat if needed
+                        current_time = time.time()
+                        if current_time - last_heartbeat >= HEARTBEAT_INTERVAL:
+                            yield ': heartbeat\n\n'
+                            last_heartbeat = current_time
+                        
+                        # Use threading.Event for non-blocking sleep simulation
+                        # This prevents Gunicorn worker timeout
+                        time.sleep(min(config.STREAM_POLL_INTERVAL, 2.0))
+                        continue
+                    
+                    normalized = []
+                    for card_data in cards:
+                        normalized_card = utils.normalize_card(card_data)
+                        if normalized_card and normalized_card['card_id'] not in seen:
+                            seen.add(normalized_card['card_id'])
+                            # Remove 'raw' from stream response to save bandwidth and memory
+                            normalized_card.pop('raw', None)
+                            normalized.append(normalized_card)
+                    
+                    # Clear cards list to free memory after processing
+                    del cards
+                    
+                    # Limit seen set size to prevent memory issues (keep last 1000)
+                    if len(seen) > 1000:
+                        # Convert to list, keep last 1000, convert back to set
+                        seen_list = list(seen)
+                        seen = set(seen_list[-1000:])
 
-            if idle >= max_idle:
-                # send a custom event to let client know stream is finished
-                yield 'event: done\n'
-                yield 'data: {}\n\n'
-                break
+                    if normalized:
+                        payload = json.dumps({'cards': normalized})
+                        yield f'data: {payload}\n\n'
+                        idle = 0
+                        last_heartbeat = time.time()
+                    else:
+                        idle += 1
+                        
+                        # Send heartbeat if needed
+                        current_time = time.time()
+                        if current_time - last_heartbeat >= HEARTBEAT_INTERVAL:
+                            yield ': heartbeat\n\n'
+                            last_heartbeat = current_time
 
-            time.sleep(poll_interval)
+                except requests.exceptions.Timeout:
+                    logger.warning(f"Timeout fetching cards for deck {deck_id} (iteration {iteration})")
+                    idle += 1
+                    # Send heartbeat
+                    current_time = time.time()
+                    if current_time - last_heartbeat >= HEARTBEAT_INTERVAL:
+                        yield ': heartbeat\n\n'
+                        last_heartbeat = current_time
+                    
+                    if idle >= config.STREAM_MAX_IDLE:
+                        yield 'event: done\n'
+                        yield 'data: {"reason": "max_idle"}\n\n'
+                        break
+                    
+                    time.sleep(min(config.STREAM_POLL_INTERVAL, 2.0))
+                    continue
+                    
+                except Exception as e:
+                    logger.error(f"Error in event stream (iteration {iteration}): {e}", exc_info=True)
+                    try:
+                        err = json.dumps({'error': str(e)[:100]})  # Limit error message length
+                        yield f'data: {err}\n\n'
+                    except Exception:
+                        pass
+                    idle += 1
+                    
+                    # Send heartbeat
+                    current_time = time.time()
+                    if current_time - last_heartbeat >= HEARTBEAT_INTERVAL:
+                        yield ': heartbeat\n\n'
+                        last_heartbeat = current_time
+
+                if idle >= config.STREAM_MAX_IDLE:
+                    yield 'event: done\n'
+                    yield 'data: {"reason": "max_idle"}\n\n'
+                    break
+
+                # Use shorter sleep intervals to prevent worker timeout
+                time.sleep(min(config.STREAM_POLL_INTERVAL, 2.0))
+                
+        except GeneratorExit:
+            # Client disconnected, cleanup
+            logger.info(f"Client disconnected from stream for deck {deck_id}")
+        except Exception as e:
+            logger.error(f"Fatal error in event stream for deck {deck_id}: {e}", exc_info=True)
+        finally:
+            # Cleanup
+            seen.clear()
 
     headers = {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache',
         'Connection': 'keep-alive',
+        'X-Accel-Buffering': 'no',  # Disable nginx buffering
     }
     return Response(event_stream(), headers=headers)
 
 
-def send_admin_notification(user_id, user_name, page='index'):
+def send_admin_notification(user_id: str, user_name: str, page: str = 'index') -> bool:
     """Send notification to admin when mini app is opened."""
-    if not ADMIN_CHAT_ID:
-        return  # Admin chat ID not configured
+    if not config.ADMIN_CHAT_ID:
+        return False
     
     try:
-        message = f"📱 Mini app opened\n\n"
-        message += f"User: {user_id}\n"
-        message += f"Name: {user_name or 'Unknown'}\n"
+        message = f"📱 Mini app opened\n\nUser: {user_id}\nName: {user_name or 'Unknown'}\n"
         
-        resp = requests.post(
-            f'{TELEGRAM_API_URL}/sendMessage',
+        response = session.post(
+            f'{config.TELEGRAM_API_URL}/sendMessage',
             json={
-                'chat_id': ADMIN_CHAT_ID,
+                'chat_id': config.ADMIN_CHAT_ID,
                 'text': message,
                 'parse_mode': 'HTML'
             },
             timeout=5
         )
-        return resp.status_code == 200
+        return response.status_code == 200
     except Exception as e:
-        print(f"Error sending admin notification: {e}")
+        logger.warning(f"Error sending admin notification: {e}")
         return False
 
 
@@ -564,10 +585,7 @@ def notify_admin():
             }), 400
         
         success = send_admin_notification(user_id, user_name, page)
-        
-        return jsonify({
-            'success': success
-        })
+        return jsonify({'success': success})
         
     except Exception as e:
         return jsonify({
@@ -591,12 +609,10 @@ def get_telegram_user_id():
         
         # Parse initData (format: key1=value1&key2=value2)
         params = parse_qs(init_data)
-        
-        # Get user parameter
         user_param = params.get('user', [None])[0]
+        
         if user_param:
             try:
-                import json
                 user_data = json.loads(unquote(user_param))
                 user_id = user_data.get('id')
                 if user_id:
@@ -604,7 +620,7 @@ def get_telegram_user_id():
                         'success': True,
                         'user_id': str(user_id)
                     })
-            except (json.JSONDecodeError, KeyError) as e:
+            except (json.JSONDecodeError, KeyError):
                 pass
         
         return jsonify({
@@ -613,6 +629,199 @@ def get_telegram_user_id():
         }), 400
         
     except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@app.route('/api/send-to-telegram', methods=['POST'])
+def send_to_telegram():
+    """Send quiz questions as polls to Telegram chat.
+    
+    Receives quiz cards and sends them as Telegram polls or messages
+    depending on the question type.
+    """
+    if not bot:
+        return jsonify({
+            'success': False,
+            'error': 'Telegram bot not available'
+        }), 503
+    
+    try:
+        data = request.get_json()
+        cards = data.get('cards', [])
+        user_id = data.get('user_id')
+        
+        if not cards:
+            return jsonify({
+                'success': False,
+                'error': 'No questions to send'
+            }), 400
+        
+        if not user_id:
+            return jsonify({
+                'success': False,
+                'error': 'User ID not provided'
+            }), 400
+        
+        # Convert user_id to integer if it's a string
+        try:
+            chat_id = int(user_id)
+        except (ValueError, TypeError):
+            return jsonify({
+                'success': False,
+                'error': 'Invalid user ID format'
+            }), 400
+        
+        sent_count = 0
+        skipped_count = 0
+        errors = []
+        
+        for card in cards:
+            try:
+                # Validate card
+                if not card.get('question'):
+                    skipped_count += 1
+                    continue
+                
+                question_text = card['question']
+                
+                # Add case details if present
+                if card.get('case_details'):
+                    question_text = f"📋 {card['case_details']}\n\n❓ {question_text}"
+                else:
+                    question_text = f"❓ {question_text}"
+                
+                # Skip if question text is too long (Telegram limit is 300 chars for poll question)
+                if len(question_text) > 300:
+                    # Truncate and add ellipsis
+                    question_text = question_text[:297] + "..."
+                
+                options = card.get('options', [])
+                card_type = str(card.get('card_type', '')).lower()
+                answer = card.get('answer', '')
+                explanation = card.get('explanation', '')
+                
+                # Check if it's an understanding/open-ended question
+                is_understanding = 'understand' in card_type or len(options) == 0
+                
+                if is_understanding:
+                    # Send as text message for understanding questions
+                    answer_text = answer if answer else 'No answer provided'
+                    if explanation and explanation != answer:
+                        message = f"{question_text}\n\n✅ **Answer:** {answer_text}\n\n💡 **Explanation:** {explanation}"
+                    else:
+                        message = f"{question_text}\n\n✅ **Answer:** {answer_text}"
+                    
+                    # Telegram message limit is 4096 characters
+                    if len(message) > 4096:
+                        message = message[:4090] + "..."
+                    
+                    try:
+                        bot.send_message(chat_id, message, parse_mode='Markdown')
+                        sent_count += 1
+                        time.sleep(0.5)  # Rate limiting
+                    except Exception as e:
+                        logger.error(f"Error sending message to {chat_id}: {e}")
+                        errors.append(f"Question {sent_count + skipped_count + 1}: {str(e)[:50]}")
+                        skipped_count += 1
+                else:
+                    # Multiple Choice or True/False: send as poll
+                    if len(options) < 2:
+                        skipped_count += 1
+                        continue
+                    
+                    # Filter and validate options
+                    valid_options = []
+                    for option in options:
+                        option_str = str(option).strip()
+                        # Telegram poll option limit is 100 characters
+                        if option_str and len(option_str) <= 100:
+                            valid_options.append(option_str)
+                    
+                    if len(valid_options) < 2:
+                        skipped_count += 1
+                        continue
+                    
+                    # Find correct option index
+                    correct_option_id = None
+                    normalized_answer = str(answer).strip()
+                    
+                    # Try exact match first
+                    for idx, option in enumerate(valid_options):
+                        option_str = str(option).strip()
+                        if option_str == normalized_answer:
+                            correct_option_id = idx
+                            break
+                    
+                    # Try case-insensitive match if exact match failed
+                    if correct_option_id is None:
+                        for idx, option in enumerate(valid_options):
+                            option_str = str(option).strip()
+                            if option_str.lower() == normalized_answer.lower():
+                                correct_option_id = idx
+                                break
+                    
+                    # If answer not found in options, try to match True/False variations
+                    if correct_option_id is None:
+                        answer_lower = normalized_answer.lower()
+                        for idx, option in enumerate(valid_options):
+                            option_str = str(option).strip().lower()
+                            if (answer_lower in ['true', 'false'] and 
+                                option_str in ['true', 'false'] and 
+                                answer_lower == option_str):
+                                correct_option_id = idx
+                                break
+                    
+                    # If still not found, use first option as default
+                    if correct_option_id is None:
+                        logger.warning(f"Answer '{answer}' not found in options for question: {question_text[:50]}")
+                        correct_option_id = 0
+                    
+                    # Prepare explanation (Telegram limit is 200 chars)
+                    poll_explanation = ''
+                    if explanation:
+                        poll_explanation = str(explanation)[:200]
+                    
+                    try:
+                        # Send poll
+                        bot.send_poll(
+                            chat_id,
+                            question_text,
+                            options=valid_options,
+                            is_anonymous=False,
+                            type='quiz',
+                            correct_option_id=correct_option_id,
+                            explanation=poll_explanation if poll_explanation else None
+                        )
+                        sent_count += 1
+                        time.sleep(0.5)  # Rate limiting between polls
+                    except Exception as e:
+                        logger.error(f"Error sending poll to {chat_id}: {e}")
+                        errors.append(f"Question {sent_count + skipped_count + 1}: {str(e)[:50]}")
+                        skipped_count += 1
+                
+            except Exception as e:
+                logger.error(f"Error processing card: {e}", exc_info=True)
+                skipped_count += 1
+                errors.append(f"Question {sent_count + skipped_count}: {str(e)[:50]}")
+                continue
+        
+        response_data = {
+            'success': True,
+            'message': f'Sent {sent_count} questions to Telegram',
+            'sent': sent_count,
+            'skipped': skipped_count
+        }
+        
+        if errors:
+            response_data['errors'] = errors[:5]  # Limit error details
+        
+        return jsonify(response_data)
+        
+    except Exception as e:
+        logger.error(f"Error in send_to_telegram endpoint: {e}", exc_info=True)
         return jsonify({
             'success': False,
             'error': str(e)
