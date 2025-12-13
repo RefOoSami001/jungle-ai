@@ -822,7 +822,7 @@ def send_to_telegram():
                             explanation=poll_explanation if poll_explanation else None
                         )
                         sent_count += 1
-                        time.sleep(0.5)  # Rate limiting between polls
+                        time.sleep(0.1)  # Rate limiting between polls
                     except Exception as e:
                         logger.error(f"Error sending poll to {chat_id}: {e}")
                         errors.append(f"Question {sent_count + skipped_count + 1}: {str(e)[:50]}")
@@ -858,3 +858,4 @@ if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     debug = os.environ.get('FLASK_ENV') == 'development'
     app.run(host='0.0.0.0', port=port, debug=debug)
+
