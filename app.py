@@ -2,9 +2,11 @@
 import json
 import logging
 import os
+import tempfile
 import time
 import uuid
 from contextlib import contextmanager
+from io import BytesIO
 from urllib.parse import parse_qs, unquote
 from typing import Dict, List, Optional, Tuple
 
@@ -12,6 +14,16 @@ from flask import Flask, Response, jsonify, redirect, render_template, request, 
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+
+# Try to import reportlab for PDF generation
+try:
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import inch
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+    REPORTLAB_AVAILABLE = True
+except ImportError:
+    REPORTLAB_AVAILABLE = False
 
 # Try to use gevent for non-blocking sleep
 try:
@@ -133,23 +145,139 @@ def _extract_text_from_file(file_path: str, filename: str,
         raise ValueError('Unsupported file type')
 
 
+def _create_pdf_from_text(text_content: str) -> Tuple[str, int]:
+    """Create a PDF file from text content.
+    
+    Returns:
+        Tuple of (file_path, estimated_pages)
+    """
+    if not REPORTLAB_AVAILABLE:
+        # Fallback: Create a simple text-based PDF using reportlab's canvas
+        try:
+            from reportlab.pdfgen import canvas
+        except ImportError:
+            raise ImportError("reportlab is required for text-to-PDF conversion. Please install it: pip install reportlab")
+        
+        # Create temporary file
+        temp_fd, temp_path = tempfile.mkstemp(suffix='.pdf', dir=app.config['UPLOAD_FOLDER'])
+        os.close(temp_fd)
+        
+        # Estimate pages (assuming ~50 lines per page)
+        lines = text_content.split('\n')
+        estimated_pages = max(1, len(lines) // 50)
+        
+        # Create simple PDF
+        c = canvas.Canvas(temp_path, pagesize=letter)
+        width, height = letter
+        y_position = height - 50
+        line_height = 14
+        margin = 50
+        
+        for line in lines:
+            if y_position < margin:
+                c.showPage()
+                y_position = height - 50
+            
+            # Wrap long lines
+            max_width = width - 2 * margin
+            words = line.split(' ')
+            current_line = ''
+            
+            for word in words:
+                test_line = current_line + (' ' if current_line else '') + word
+                if c.stringWidth(test_line, 'Helvetica', 10) > max_width and current_line:
+                    c.drawString(margin, y_position, current_line)
+                    y_position -= line_height
+                    current_line = word
+                    if y_position < margin:
+                        c.showPage()
+                        y_position = height - 50
+                else:
+                    current_line = test_line
+            
+            if current_line:
+                c.drawString(margin, y_position, current_line)
+                y_position -= line_height
+        
+        c.save()
+        return temp_path, estimated_pages
+    
+    # Use reportlab for better PDF generation
+    temp_fd, temp_path = tempfile.mkstemp(suffix='.pdf', dir=app.config['UPLOAD_FOLDER'])
+    os.close(temp_fd)
+    
+    # Create PDF
+    doc = SimpleDocTemplate(temp_path, pagesize=letter,
+                          rightMargin=72, leftMargin=72,
+                          topMargin=72, bottomMargin=18)
+    
+    # Container for the 'Flowable' objects
+    story = []
+    
+    # Define styles
+    styles = getSampleStyleSheet()
+    normal_style = ParagraphStyle(
+        'CustomNormal',
+        parent=styles['Normal'],
+        fontSize=11,
+        leading=14,
+        spaceAfter=6,
+    )
+    
+    # Split text into paragraphs and add to story
+    paragraphs = text_content.split('\n\n')
+    for para in paragraphs:
+        if para.strip():
+            # Replace single newlines with <br/> for reportlab
+            para_text = para.replace('\n', '<br/>')
+            story.append(Paragraph(para_text, normal_style))
+            story.append(Spacer(1, 0.2 * inch))
+    
+    # Build PDF
+    doc.build(story)
+    
+    # Estimate pages (rough calculation: ~50 lines per page)
+    lines = text_content.split('\n')
+    estimated_pages = max(1, len(lines) // 50)
+    
+    return temp_path, estimated_pages
+
+
 def process_file_upload(file, user_id: str) -> Tuple[bool, Dict]:
     """Process uploaded file: extract text and upload to S3.
+    
+    Args:
+        file: File object or file-like object with save() method and filename attribute
+        user_id: User ID for the upload
     
     Returns:
         Tuple of (success, result_dict)
         result_dict contains: extracted_text, total_pages, s3_object_key, s3_url, 
                               filename, content_type, start_page, end_page
     """
-    if not file or not file.filename or not utils.allowed_file(file.filename):
+    # Handle both regular file uploads and text-generated PDFs
+    if hasattr(file, 'filename'):
+        filename = file.filename
+    else:
+        filename = getattr(file, 'filename', 'text_input.pdf')
+    
+    if not filename or (hasattr(file, 'filename') and not utils.allowed_file(filename)):
         return False, {'error': 'Please select a valid PDF or Word file'}
     
-    file_path = utils.get_secure_file_path(file.filename, app.config['UPLOAD_FOLDER'])
+    file_path = utils.get_secure_file_path(filename, app.config['UPLOAD_FOLDER'])
     
     with _file_cleanup(file_path):
         try:
-            # Save uploaded file
-            file.save(file_path)
+            # Save uploaded file or copy from source
+            if hasattr(file, 'save'):
+                # Regular file upload
+                file.save(file_path)
+            elif hasattr(file, 'file_path'):
+                # For text-generated PDFs
+                import shutil
+                shutil.copy2(file.file_path, file_path)
+            else:
+                return False, {'error': 'Invalid file object'}
             
             # Parse page range
             start_page, end_page = _parse_page_range()
@@ -191,7 +319,9 @@ def process_file_upload(file, user_id: str) -> Tuple[bool, Dict]:
                 return False, {'error': error_msg}
             
             # Upload file to S3
-            content_type = utils.get_content_type(file.filename)
+            # Get filename - handle both regular files and text-generated PDFs
+            file_filename = getattr(file, 'filename', 'text_input.pdf')
+            content_type = utils.get_content_type(file_filename)
             upload_result = upload_pdf_to_s3(file_path, user_id, content_type)
             
             if not upload_result.get('success'):
@@ -203,7 +333,7 @@ def process_file_upload(file, user_id: str) -> Tuple[bool, Dict]:
                 'total_pages': total_pages,
                 's3_object_key': upload_result.get('s3_object_key'),
                 's3_url': upload_result.get('s3_url'),
-                'filename': file.filename,
+                'filename': file_filename,
                 'content_type': content_type,
                 'start_page': start_page,
                 'end_page': end_page,
@@ -313,13 +443,51 @@ def generate():
     difficulty = request.form.get('difficulty', 'Advanced')
     types = request.form.getlist('question_type')
     user_id = request.form.get('user_id', config.DEFAULT_USER_ID)
+    input_method = request.form.get('input_method', 'file')
     
-    # Process file upload
-    if 'file' not in request.files:
-        return render_template('index.html', error='Please select a valid PDF or Word file')
-    
-    file = request.files['file']
-    success, result = process_file_upload(file, user_id)
+    # Process input based on method
+    if input_method == 'text':
+        # Handle text input
+        text_content = request.form.get('text_content', '').strip()
+        if not text_content:
+            return render_template('index.html', error='Please enter some text content')
+        
+        if len(text_content) < 50:
+            return render_template('index.html', error='Please enter at least 50 characters of text')
+        
+        # Create PDF from text
+        pdf_path = None
+        try:
+            pdf_path, estimated_pages = _create_pdf_from_text(text_content)
+            
+            # Create a file-like object to simulate file upload
+            class TextFileWrapper:
+                def __init__(self, file_path, filename):
+                    self.file_path = file_path
+                    self.filename = filename
+                
+                def save(self, path):
+                    import shutil
+                    shutil.copy2(self.file_path, path)
+            
+            # Process the generated PDF
+            fake_file = TextFileWrapper(pdf_path, 'text_input.pdf')
+            success, result = process_file_upload(fake_file, user_id)
+            
+        except Exception as e:
+            logger.error(f"Error creating PDF from text: {e}", exc_info=True)
+            return render_template('index.html', error=f'Error processing text: {str(e)}')
+        finally:
+            # Clean up temporary PDF
+            if pdf_path:
+                utils.safe_remove_file(pdf_path)
+    else:
+        # Process file upload
+        if 'file' not in request.files:
+            return render_template('index.html', error='Please select a valid PDF or Word file')
+        
+        file = request.files['file']
+        success, result = process_file_upload(file, user_id)
     
     if not success:
         return render_template('index.html', error=result.get('error', 'Unknown error'))
@@ -352,6 +520,7 @@ def generate():
         end_page=result['end_page'],
         amount=amount,
     )
+    
     
     # Send generation request
     try:
@@ -816,7 +985,7 @@ def send_to_telegram():
                             chat_id,
                             question_text,
                             options=valid_options,
-                            is_anonymous=False,
+                            is_anonymous=True,
                             type='quiz',
                             correct_option_id=correct_option_id,
                             explanation=poll_explanation if poll_explanation else None
@@ -858,4 +1027,3 @@ if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     debug = os.environ.get('FLASK_ENV') == 'development'
     app.run(host='0.0.0.0', port=port, debug=debug)
-

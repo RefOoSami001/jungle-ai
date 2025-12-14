@@ -54,6 +54,7 @@ The app will be available at `http://localhost:5000`
 
 4. **Environment Variables:**
    - `TELEGRAM_BOT_TOKEN` - Your Telegram bot token (required for Telegram features)
+   - `ADMIN_CHAT_ID` - Your Telegram chat ID to receive notifications when users open the mini app (optional)
    - `FLASK_ENV=production` (for production mode)
    - `PORT` - Automatically set by Koyeb (no need to configure)
 
@@ -66,9 +67,15 @@ The app will be available at `http://localhost:5000`
 To use as a Telegram Mini App:
 
 1. Create a bot with [@BotFather](https://t.me/botfather)
-2. Get your bot token
-3. Update `TELEGRAM_BOT_TOKEN` in `app.py` with your bot token
+2. Get your bot token and set `TELEGRAM_BOT_TOKEN` environment variable
+3. (Optional) Get your admin chat ID by messaging [@userinfobot](https://t.me/userinfobot) and set `ADMIN_CHAT_ID` environment variable to receive notifications when users open the mini app
 4. Set up your bot's web app URL in BotFather to point to your Koyeb deployment URL
+
+**Admin Notifications:**
+When a user opens the mini app, the admin (if `ADMIN_CHAT_ID` is set) will receive a notification with:
+- User ID
+- User name
+- Page opened (index or quiz)
 
 ## Project Structure
 
