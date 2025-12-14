@@ -90,24 +90,49 @@
           const slot = document.getElementById('card-slot');
           if (!slot) return;
           
-          slot.innerHTML = '';
-          
-          if (cards.length === 0) {
-            slot.innerHTML = '<div class="card-quiz"><div class="q">No cards yet — waiting for generation</div></div>';
-            progress.textContent = 'Question 0 of 0';
-            prevBtn.disabled = true;
-            nextBtn.disabled = true;
-            return;
+          // Animate card exit
+          const currentCard = slot.querySelector('.card-quiz');
+          if (currentCard) {
+            currentCard.style.opacity = '0';
+            currentCard.style.transform = 'translateX(-20px) scale(0.95)';
+            currentCard.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
           }
           
-          const card = cards[index];
-          if (!card) return;
-          
-          progress.textContent = `Question ${index + 1} of ${cards.length}`;
+          setTimeout(() => {
+            slot.innerHTML = '';
+            
+            if (cards.length === 0) {
+              slot.innerHTML = '<div class="card-quiz"><div class="q">No cards yet — waiting for generation</div></div>';
+              progress.textContent = 'Question 0 of 0';
+              prevBtn.disabled = true;
+              nextBtn.disabled = true;
+              const emptyCard = slot.querySelector('.card-quiz');
+              if (emptyCard) {
+                emptyCard.style.opacity = '0';
+                emptyCard.style.transform = 'scale(0.9)';
+                setTimeout(() => {
+                  emptyCard.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
+                  emptyCard.style.opacity = '1';
+                  emptyCard.style.transform = 'scale(1)';
+                }, 10);
+              }
+              return;
+            }
+            
+            const card = cards[index];
+            if (!card) return;
+            
+            // Animate progress update
+            progress.style.transform = 'scale(1.1)';
+            progress.style.transition = 'transform 0.2s ease';
+            progress.textContent = `Question ${index + 1} of ${cards.length}`;
+            setTimeout(() => {
+              progress.style.transform = 'scale(1)';
+            }, 200);
 
-          const wrapper = document.createElement('div');
-          wrapper.className = 'card-quiz';
-          wrapper.setAttribute('data-card-id', card.card_id);
+            const wrapper = document.createElement('div');
+            wrapper.className = 'card-quiz';
+            wrapper.setAttribute('data-card-id', card.card_id);
           
           if (card.card_type) {
             const badge = document.createElement('div');
@@ -299,19 +324,47 @@
             wrapper.appendChild(answerDiv);
           }
           
-          cardsContainer.innerHTML = '';
-          const slotWrap = document.createElement('div');
-          slotWrap.id = 'card-slot';
-          slotWrap.appendChild(wrapper);
-          cardsContainer.appendChild(slotWrap);
+            cardsContainer.innerHTML = '';
+            const slotWrap = document.createElement('div');
+            slotWrap.id = 'card-slot';
+            slotWrap.appendChild(wrapper);
+            cardsContainer.appendChild(slotWrap);
+            
+            // Animate card entrance
+            wrapper.style.opacity = '0';
+            wrapper.style.transform = 'translateX(20px) scale(0.95)';
+            setTimeout(() => {
+              wrapper.style.transition = 'opacity 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)';
+              wrapper.style.opacity = '1';
+              wrapper.style.transform = 'translateX(0) scale(1)';
+            }, 10);
 
-          // Update navigation buttons
-          prevBtn.disabled = (index === 0);
-          nextBtn.disabled = (index >= cards.length - 1);
+            // Update navigation buttons with animation
+            const wasPrevDisabled = prevBtn.disabled;
+            const wasNextDisabled = nextBtn.disabled;
+            prevBtn.disabled = (index === 0);
+            nextBtn.disabled = (index >= cards.length - 1);
+            
+            // Animate button state changes
+            if (wasPrevDisabled !== prevBtn.disabled || wasNextDisabled !== nextBtn.disabled) {
+              [prevBtn, nextBtn].forEach(btn => {
+                btn.style.transform = 'scale(0.95)';
+                setTimeout(() => {
+                  btn.style.transition = 'transform 0.2s ease';
+                  btn.style.transform = 'scale(1)';
+                }, 10);
+              });
+            }
+          }, 300);
         }
 
         prevBtn.addEventListener('click', function() {
           if (currentIndex > 0) {
+            // Button click animation
+            this.style.transform = 'scale(0.9)';
+            setTimeout(() => {
+              this.style.transform = 'scale(1)';
+            }, 100);
             currentIndex--;
             renderCardAt(currentIndex);
           }
@@ -319,10 +372,19 @@
         
         nextBtn.addEventListener('click', function() {
           if (currentIndex < cards.length - 1) {
+            // Button click animation
+            this.style.transform = 'scale(0.9)';
+            setTimeout(() => {
+              this.style.transform = 'scale(1)';
+            }, 100);
             currentIndex++;
             renderCardAt(currentIndex);
           }
         });
+        
+        // Initialize button transitions
+        prevBtn.style.transition = 'transform 0.2s ease';
+        nextBtn.style.transition = 'transform 0.2s ease';
 
         // Selection is handled immediately on input change (see input listeners created when rendering options).
 
@@ -333,8 +395,12 @@
 
         function hideLoadingIndicator() {
           if (loadingIndicator && !hasShownFirstCard) {
-            loadingIndicator.style.display = 'none';
-            hasShownFirstCard = true;
+            loadingIndicator.style.opacity = '0';
+            loadingIndicator.style.transition = 'opacity 0.4s ease';
+            setTimeout(() => {
+              loadingIndicator.style.display = 'none';
+              hasShownFirstCard = true;
+            }, 400);
           }
         }
 
@@ -356,13 +422,16 @@
                 }
               });
               
-              // Render current card when ready
+              // Render current card when ready with animation
               if (hasNewCards) {
-                renderCardAt(currentIndex);
-                // Hide loading indicator when first card appears
-                if (cards.length > 0) {
-                  hideLoadingIndicator();
-                }
+                // Add a slight delay for smooth animation
+                setTimeout(() => {
+                  renderCardAt(currentIndex);
+                  // Hide loading indicator when first card appears
+                  if (cards.length > 0) {
+                    hideLoadingIndicator();
+                  }
+                }, 50);
               }
             } catch (err) {
               console.error('Invalid message:', err, event.data);
@@ -464,6 +533,12 @@
             return;
           }
           
+          // Button click animation
+          this.style.transform = 'scale(0.9) rotate(5deg)';
+          setTimeout(() => {
+            this.style.transform = 'scale(1) rotate(0deg)';
+          }, 200);
+          
           // Get user ID from Telegram WebApp
           const userInfo = getTelegramUserInfo();
           if (!userInfo.id) {
@@ -480,6 +555,11 @@
           isSending = true;
           sendToTelegramBtn.disabled = true;
           sendToTelegramBtn.style.opacity = '0.6';
+          sendToTelegramBtn.style.transform = 'scale(0.95)';
+          sendToTelegramBtn.style.transition = 'all 0.3s ease';
+          
+          // Add pulsing animation while sending
+          sendToTelegramBtn.style.animation = 'pulse 1s ease-in-out infinite';
           
           try {
             const response = await fetch('/api/send-to-telegram', {
@@ -507,6 +587,16 @@
             isSending = false;
             sendToTelegramBtn.disabled = false;
             sendToTelegramBtn.style.opacity = '1';
+            sendToTelegramBtn.style.transform = 'scale(1)';
+            sendToTelegramBtn.style.animation = '';
+            
+            // Success animation
+            if (result && result.success) {
+              sendToTelegramBtn.style.background = 'linear-gradient(135deg, var(--success), #16a34a)';
+              setTimeout(() => {
+                sendToTelegramBtn.style.background = 'linear-gradient(135deg, var(--accent), var(--accent-2))';
+              }, 2000);
+            }
           }
         });
         
