@@ -37,6 +37,16 @@ body {
   color: #111827;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  animation: fadeIn 0.6s ease-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 .container {
@@ -44,6 +54,18 @@ body {
   margin: 28px auto;
   padding: 20px;
   padding-bottom: 100px;
+  animation: slideUp 0.6s ease-out;
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .topbar {
@@ -52,6 +74,18 @@ body {
   justify-content: flex-start;
   margin-bottom: 18px;
   gap: 12px;
+  animation: slideDown 0.5s ease-out 0.1s both;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .brand {
@@ -80,7 +114,29 @@ body {
   padding: 18px;
   border-radius: 8px;
   box-shadow: var(--shadow-md);
+  animation: fadeInUp 0.5s ease-out both;
+  transition: transform var(--transition-smooth), box-shadow var(--transition-smooth);
 }
+
+.card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.1);
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(15px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.card:nth-child(1) { animation-delay: 0.1s; }
+.card:nth-child(2) { animation-delay: 0.2s; }
+.card:nth-child(3) { animation-delay: 0.3s; }
 
 .form-grid {
   display: grid;
@@ -181,12 +237,37 @@ label.small {
   border: 0;
   font-weight: 400;
   cursor: pointer;
-  transition: opacity var(--transition-base), transform var(--transition-base);
+  transition: all var(--transition-smooth);
+  position: relative;
+  overflow: hidden;
+}
+
+.btn::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.2);
+  transform: translate(-50%, -50%);
+  transition: width 0.6s, height 0.6s;
+}
+
+.btn:hover:not(:disabled)::before {
+  width: 300px;
+  height: 300px;
 }
 
 .btn:hover:not(:disabled) {
   opacity: 0.9;
-  transform: translateY(-1px);
+  transform: translateY(-2px) scale(1.02);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.15);
+}
+
+.btn:active:not(:disabled) {
+  transform: translateY(0) scale(0.98);
 }
 
 .btn:disabled {
@@ -221,6 +302,24 @@ label.small {
   border-radius: 8px;
   background: transparent;
   border: 1px solid var(--border-color-light);
+  animation: cardSlideIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition: transform var(--transition-smooth), box-shadow var(--transition-smooth);
+}
+
+.card-quiz:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(111, 76, 255, 0.1);
+}
+
+@keyframes cardSlideIn {
+  from {
+    opacity: 0;
+    transform: translateX(-20px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
 }
 
 .card-quiz .q {
@@ -249,6 +348,24 @@ label.small {
 .option {
   display: block;
   cursor: pointer;
+  animation: optionFadeIn 0.3s ease-out both;
+}
+
+.option:nth-child(1) { animation-delay: 0.05s; }
+.option:nth-child(2) { animation-delay: 0.1s; }
+.option:nth-child(3) { animation-delay: 0.15s; }
+.option:nth-child(4) { animation-delay: 0.2s; }
+.option:nth-child(5) { animation-delay: 0.25s; }
+
+@keyframes optionFadeIn {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
 
 .option input {
@@ -517,6 +634,7 @@ label.small {
   align-items:center;
   justify-content:center;
   z-index:1000;
+  animation: fadeIn 0.3s ease-out;
 }
 .loading-content{
   text-align:center;
@@ -543,6 +661,18 @@ label.small {
   border-top:1px solid rgba(111,76,255,0.08);
   box-shadow:0 -8px 24px rgba(15,23,42,0.06);
   z-index:100;
+  animation: slideUpControls 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes slideUpControls {
+  from {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
 }
 .fixed-controls .control-row{
   max-width:680px;
@@ -565,9 +695,21 @@ label.small {
   padding: 32px 20px;
   text-align: center;
   background: rgba(16, 24, 40, 0.01);
-  transition: all var(--transition-base);
+  transition: all var(--transition-smooth);
   cursor: pointer;
   margin-bottom: 12px;
+  animation: fadeInScale 0.4s ease-out;
+}
+
+@keyframes fadeInScale {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 .file-upload-area:hover {
@@ -578,7 +720,17 @@ label.small {
 .file-upload-area.drag-over {
   border-color: var(--accent);
   background: rgba(111, 76, 255, 0.05);
-  transform: scale(1.02);
+  transform: scale(1.05);
+  animation: pulse 0.6s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(111, 76, 255, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 10px rgba(111, 76, 255, 0);
+  }
 }
 
 .file-upload-content {
@@ -617,15 +769,38 @@ label.small {
   justify-content: center;
   z-index: 1000;
   transition: all var(--transition-smooth);
+  animation: floatIn 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) 0.5s both, float 3s ease-in-out infinite;
+}
+
+@keyframes floatIn {
+  from {
+    opacity: 0;
+    transform: scale(0) rotate(-180deg);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) rotate(0deg);
+  }
+}
+
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
 }
 
 .floating-btn:hover {
-  transform: scale(1.1);
-  box-shadow: 0 6px 16px rgba(111, 76, 255, 0.5);
+  transform: scale(1.15) translateY(-5px);
+  box-shadow: 0 8px 24px rgba(111, 76, 255, 0.6);
+  animation: float 1.5s ease-in-out infinite;
 }
 
 .floating-btn:active {
-  transform: scale(0.95);
+  transform: scale(0.9);
+  animation: none;
 }
 
 .floating-btn:disabled {
@@ -646,4 +821,197 @@ label.small {
     width: 20px;
     height: 20px;
   }
+}
+
+/* Smooth scroll */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Textarea animations */
+textarea.input {
+  transition: border-color var(--transition-base), transform var(--transition-base), box-shadow var(--transition-base);
+}
+
+textarea.input:focus {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(111, 76, 255, 0.15);
+}
+
+/* Progress bar animation */
+#progress {
+  transition: all var(--transition-smooth);
+  display: inline-block;
+}
+
+/* Segmented control animations */
+.seg-item {
+  transition: all var(--transition-base);
+}
+
+.seg-item span {
+  position: relative;
+  overflow: hidden;
+}
+
+.seg-item span::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.2);
+  transform: translate(-50%, -50%);
+  transition: width 0.4s, height 0.4s;
+}
+
+.seg-item input:checked + span::before {
+  width: 200px;
+  height: 200px;
+}
+
+/* Badge animation */
+.badge {
+  animation: badgePop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes badgePop {
+  from {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Case details animation */
+.case {
+  animation: slideInLeft 0.4s ease-out;
+}
+
+@keyframes slideInLeft {
+  from {
+    opacity: 0;
+    transform: translateX(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* Question text animation */
+.card-quiz .q {
+  animation: fadeInDown 0.5s ease-out 0.1s both;
+}
+
+@keyframes fadeInDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Answer reveal animation enhancement */
+.answer.revealed {
+  animation: answerReveal 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes answerReveal {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Input focus animations */
+input.input:focus,
+textarea.input:focus,
+select.input:focus {
+  animation: inputFocus 0.3s ease;
+}
+
+@keyframes inputFocus {
+  0% {
+    box-shadow: 0 0 0 0 rgba(111, 76, 255, 0.4);
+  }
+  100% {
+    box-shadow: 0 0 0 4px rgba(111, 76, 255, 0.1);
+  }
+}
+
+/* Error message animation */
+#page-range-error {
+  animation: shake 0.5s ease;
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  10%, 30%, 50%, 70%, 90% { transform: translateX(-5px); }
+  20%, 40%, 60%, 80% { transform: translateX(5px); }
+}
+
+/* Logo animation */
+.logo {
+  animation: logoSpin 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes logoSpin {
+  from {
+    opacity: 0;
+    transform: rotate(-180deg) scale(0);
+  }
+  to {
+    opacity: 1;
+    transform: rotate(0deg) scale(1);
+  }
+}
+
+/* Topbar brand animation */
+.brand {
+  animation: brandSlide 0.5s ease-out 0.2s both;
+}
+
+@keyframes brandSlide {
+  from {
+    opacity: 0;
+    transform: translateX(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* Smooth transitions for all interactive elements */
+input, textarea, select, button, label {
+  transition: all var(--transition-base);
+}
+
+/* Loading spinner enhancement */
+.spinner {
+  animation: spin 1s linear infinite, pulse 2s ease-in-out infinite;
+}
+
+/* Success state animation */
+.btn.success {
+  background: var(--success);
+  animation: successPulse 0.6s ease;
+}
+
+@keyframes successPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.05); }
 }
