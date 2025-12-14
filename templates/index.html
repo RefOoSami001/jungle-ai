@@ -36,7 +36,14 @@
         <form method="post" action="/generate" enctype="multipart/form-data" id="quiz-form">
           <div class="form-grid">
             <div>
-              <label class="small">Upload file (PDF or Word):</label>
+              <label class="small">Input Method:</label>
+              <div class="segmented" role="radiogroup" style="margin-bottom:16px">
+                <label class="seg-item"><input type="radio" name="input_method" value="file" checked><span>Upload File</span></label>
+                <label class="seg-item"><input type="radio" name="input_method" value="text"><span>Text Input</span></label>
+              </div>
+              
+              <div id="file-input-section">
+                <label class="small">Upload file (PDF or Word):</label>
               <div id="file-upload-area" class="file-upload-area">
                 <input type="file" name="file" id="file-input" accept=".pdf,.doc,.docx" style="display:none">
                 <div id="file-upload-content" class="file-upload-content">
@@ -80,6 +87,15 @@
                   <span id="total-pages" style="color:var(--muted);font-size:13px"></span>
                 </div>
                 <div id="page-range-error" style="margin-top:8px;color:var(--danger);font-size:13px;display:none"></div>
+              </div>
+              </div>
+              
+              <div id="text-input-section" style="display:none">
+                <label class="small">Enter text content:</label>
+                <textarea name="text_content" id="text-content" class="input" rows="12" placeholder="Paste or type your text content here..." style="font-family:monospace;font-size:14px;resize:vertical;min-height:200px"></textarea>
+                <div style="margin-top:8px;font-size:13px;color:var(--muted)">
+                  <span id="text-char-count">0</span> characters
+                </div>
               </div>
 
               <div style="margin-top:18px">
@@ -151,22 +167,110 @@
         const generateBtn = document.getElementById('generate-btn');
         const generateBtnText = document.getElementById('generate-btn-text');
         const generateBtnSpinner = document.getElementById('generate-btn-spinner');
+        const fileInputSection = document.getElementById('file-input-section');
+        const textInputSection = document.getElementById('text-input-section');
+        const textContent = document.getElementById('text-content');
+        const textCharCount = document.getElementById('text-char-count');
+        const inputMethodRadios = document.querySelectorAll('input[name="input_method"]');
         
         let maxPages = null;
         let isPDF = false;
+        
+        // Handle input method toggle with smooth animations
+        inputMethodRadios.forEach(radio => {
+          radio.addEventListener('change', function() {
+            if (this.value === 'file') {
+              // Fade out text section, fade in file section
+              textInputSection.style.opacity = '0';
+              textInputSection.style.transform = 'translateY(-10px)';
+              setTimeout(() => {
+                textInputSection.style.display = 'none';
+                fileInputSection.style.display = 'block';
+                fileInputSection.style.opacity = '0';
+                fileInputSection.style.transform = 'translateY(10px)';
+                textContent.value = '';
+                setTimeout(() => {
+                  fileInputSection.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
+                  fileInputSection.style.opacity = '1';
+                  fileInputSection.style.transform = 'translateY(0)';
+                }, 10);
+              }, 200);
+            } else {
+              // Fade out file section, fade in text section
+              fileInputSection.style.opacity = '0';
+              fileInputSection.style.transform = 'translateY(-10px)';
+              setTimeout(() => {
+                fileInputSection.style.display = 'none';
+                textInputSection.style.display = 'block';
+                textInputSection.style.opacity = '0';
+                textInputSection.style.transform = 'translateY(10px)';
+                fileInput.value = '';
+                fileUploadContent.style.display = 'flex';
+                fileSelectedContent.style.display = 'none';
+                pageRangeContainer.style.display = 'none';
+                setTimeout(() => {
+                  textInputSection.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
+                  textInputSection.style.opacity = '1';
+                  textInputSection.style.transform = 'translateY(0)';
+                }, 10);
+              }, 200);
+            }
+          });
+        });
+        
+        // Initialize transitions for sections
+        fileInputSection.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
+        textInputSection.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
+        pageRangeContainer.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
+        
+        // Add stagger animation to form elements on load
+        window.addEventListener('load', function() {
+          const formElements = document.querySelectorAll('.card, .segmented, .btn');
+          formElements.forEach((el, index) => {
+            el.style.opacity = '0';
+            el.style.transform = 'translateY(10px)';
+            setTimeout(() => {
+              el.style.transition = 'opacity 0.4s ease, transform 0.4s ease';
+              el.style.opacity = '1';
+              el.style.transform = 'translateY(0)';
+            }, index * 50);
+          });
+        });
+        
+        // Update character count for text input
+        textContent.addEventListener('input', function() {
+          textCharCount.textContent = this.value.length.toLocaleString();
+        });
 
-        // Remove file handler
+        // Remove file handler with animation
         removeFileBtn.addEventListener('click', function(e) {
           e.preventDefault();
-          fileInput.value = '';
-          fileUploadContent.style.display = 'flex';
-          fileSelectedContent.style.display = 'none';
-          pageRangeContainer.style.display = 'none';
-          maxPages = null;
-          pageStart.value = '';
-          pageEnd.value = '';
-          pageRangeError.style.display = 'none';
+          
+          // Animate removal
+          fileSelectedContent.style.opacity = '0';
+          fileSelectedContent.style.transform = 'scale(0.9)';
+          setTimeout(() => {
+            fileInput.value = '';
+            fileSelectedContent.style.display = 'none';
+            fileUploadContent.style.display = 'flex';
+            fileUploadContent.style.opacity = '0';
+            fileUploadContent.style.transform = 'scale(0.9)';
+            pageRangeContainer.style.display = 'none';
+            maxPages = null;
+            pageStart.value = '';
+            pageEnd.value = '';
+            pageRangeError.style.display = 'none';
+            setTimeout(() => {
+              fileUploadContent.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
+              fileUploadContent.style.opacity = '1';
+              fileUploadContent.style.transform = 'scale(1)';
+            }, 10);
+          }, 200);
         });
+        
+        // Initialize transitions
+        fileUploadContent.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
+        fileSelectedContent.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
 
         // Drag and drop handlers
         fileUploadArea.addEventListener('dragover', function(e) {
@@ -199,16 +303,36 @@
           
           fileName.textContent = file.name;
           fileSize.textContent = formatFileSize(file.size);
-          fileUploadContent.style.display = 'none';
-          fileSelectedContent.style.display = 'flex';
+          
+          // Animate file selection
+          fileUploadContent.style.opacity = '0';
+          fileUploadContent.style.transform = 'scale(0.9)';
+          setTimeout(() => {
+            fileUploadContent.style.display = 'none';
+            fileSelectedContent.style.display = 'flex';
+            fileSelectedContent.style.opacity = '0';
+            fileSelectedContent.style.transform = 'scale(0.9)';
+            setTimeout(() => {
+              fileSelectedContent.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
+              fileSelectedContent.style.opacity = '1';
+              fileSelectedContent.style.transform = 'scale(1)';
+            }, 10);
+          }, 200);
           
           const fileNameLower = file.name.toLowerCase();
           isPDF = fileNameLower.endsWith('.pdf');
           const isWord = fileNameLower.endsWith('.doc') || fileNameLower.endsWith('.docx');
           
-          if (isPDF || isWord) {
-            pageRangeContainer.style.display = 'block';
-            maxPages = null;
+            if (isPDF || isWord) {
+              pageRangeContainer.style.display = 'block';
+              pageRangeContainer.style.opacity = '0';
+              pageRangeContainer.style.transform = 'translateY(-10px)';
+              maxPages = null;
+              setTimeout(() => {
+                pageRangeContainer.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
+                pageRangeContainer.style.opacity = '1';
+                pageRangeContainer.style.transform = 'translateY(0)';
+              }, 10);
             
             if (isPDF) {
               // Try to get page count from PDF
@@ -233,7 +357,11 @@
             pageEnd.value = '';
             pageRangeError.style.display = 'none';
           } else {
-            pageRangeContainer.style.display = 'none';
+            pageRangeContainer.style.opacity = '0';
+            pageRangeContainer.style.transform = 'translateY(-10px)';
+            setTimeout(() => {
+              pageRangeContainer.style.display = 'none';
+            }, 300);
             maxPages = null;
           }
         }
@@ -323,10 +451,36 @@
 
         // Form submission validation and button state
         form.addEventListener('submit', function(e) {
-          if (!fileInput.files || fileInput.files.length === 0) {
-            e.preventDefault();
-            alert('Please select a file to upload');
-            return false;
+          const selectedMethod = document.querySelector('input[name="input_method"]:checked').value;
+          
+          if (selectedMethod === 'file') {
+            if (!fileInput.files || fileInput.files.length === 0) {
+              e.preventDefault();
+              alert('Please select a file to upload');
+              return false;
+            }
+            
+            // Validate page range if visible
+            if (pageRangeContainer.style.display !== 'none') {
+              if (!validatePageRange()) {
+                e.preventDefault();
+                return false;
+              }
+            }
+          } else {
+            // Text input method
+            const textValue = textContent.value.trim();
+            if (!textValue) {
+              e.preventDefault();
+              alert('Please enter some text content');
+              return false;
+            }
+            
+            if (textValue.length < 50) {
+              e.preventDefault();
+              alert('Please enter at least 50 characters of text');
+              return false;
+            }
           }
           
           // Validate at least one question type is selected
@@ -337,21 +491,25 @@
             return false;
           }
           
-          // Validate page range if visible
-          if (pageRangeContainer.style.display !== 'none') {
-            if (!validatePageRange()) {
-              e.preventDefault();
-              return false;
-            }
-          }
-          
-          // Disable button and show loading state
+          // Disable button and show loading state with animation
           generateBtn.disabled = true;
           generateBtn.style.opacity = '0.7';
           generateBtn.style.cursor = 'not-allowed';
+          generateBtn.style.transform = 'scale(0.98)';
           generateBtnText.textContent = 'Generating...';
           generateBtnSpinner.style.display = 'inline-block';
+          generateBtnSpinner.style.opacity = '0';
+          generateBtnSpinner.style.transition = 'opacity 0.3s ease';
+          setTimeout(() => {
+            generateBtnSpinner.style.opacity = '1';
+          }, 10);
+          
+          // Add pulsing animation
+          generateBtn.style.animation = 'pulse 2s ease-in-out infinite';
         });
+        
+        // Add smooth scroll behavior
+        document.documentElement.style.scrollBehavior = 'smooth';
       })();
     </script>
   </body>
