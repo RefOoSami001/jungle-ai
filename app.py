@@ -884,9 +884,9 @@ def send_to_telegram():
                 
                 # Add case details if present
                 if card.get('case_details'):
-                    question_text = f"📋 {card['case_details']}\n\n❓ {question_text}"
+                    question_text = f"📋 {card['case_details']}\n\n {question_text}"
                 else:
-                    question_text = f"❓ {question_text}"
+                    question_text = f"{question_text}"
                 
                 # Skip if question text is too long (Telegram limit is 300 chars for poll question)
                 if len(question_text) > 300:
@@ -988,7 +988,7 @@ def send_to_telegram():
                             is_anonymous=True,
                             type='quiz',
                             correct_option_id=correct_option_id,
-                            explanation=poll_explanation if poll_explanation else None
+                            # explanation=poll_explanation if poll_explanation else None
                         )
                         sent_count += 1
                         time.sleep(0.1)  # Rate limiting between polls
