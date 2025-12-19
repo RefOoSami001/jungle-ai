@@ -10,7 +10,7 @@ from io import BytesIO
 from urllib.parse import parse_qs, unquote
 from typing import Dict, List, Optional, Tuple
 
-from flask import Flask, Response, jsonify, redirect, render_template, request, url_for
+from flask import Flask, Response, jsonify, redirect, render_template, request, url_for, send_file
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -425,6 +425,129 @@ def fetch_cards_from_api(deck_id: str, user_id: str, timeout: int = None) -> Tup
     except Exception as e:
         logger.error(f"Unexpected error fetching cards: {e}", exc_info=True)
         return False, []
+
+
+@app.route('/export/<deck_id>')
+def export_deck(deck_id):
+    """Export deck in various formats: ?format=pdf|docx|json|csv
+
+    Returns a file download.
+    """
+    fmt = request.args.get('format', 'json').lower()
+    user_id = request.args.get('user_id', config.DEFAULT_USER_ID)
+
+    success, cards = fetch_cards_from_api(deck_id, user_id)
+    if not success:
+        return render_template('quiz.html', cards=[], deck_id=deck_id, error='Failed to fetch cards for export'), 404
+
+    # Normalize cards for export
+    normalized = utils.normalize_cards(cards)
+
+    if fmt == 'json':
+        import json as _json
+        bio = BytesIO()
+        bio.write(_json.dumps({'cards': normalized}, ensure_ascii=False, indent=2).encode('utf-8'))
+        bio.seek(0)
+        return send_file(bio, mimetype='application/json', as_attachment=True,
+                         download_name=f'deck_{deck_id}.json')
+
+    if fmt == 'csv':
+        import csv
+        bio = BytesIO()
+        text_io = bio
+        # Use text writer via newline handling
+        writer = csv.writer(TextIOWrapper(bio, 'utf-8', newline='')) if False else None
+        # Simpler: build CSV in string and encode
+        import io
+        s = io.StringIO()
+        csvw = csv.writer(s)
+        csvw.writerow(['question', 'options', 'answer', 'explanation', 'card_id'])
+        for c in normalized:
+            options = ' ||| '.join(c.get('options', []) or [])
+            csvw.writerow([c.get('question',''), options, c.get('answer',''), c.get('explanation',''), c.get('card_id','')])
+        bio = BytesIO(s.getvalue().encode('utf-8'))
+        bio.seek(0)
+        return send_file(bio, mimetype='text/csv', as_attachment=True,
+                         download_name=f'deck_{deck_id}.csv')
+
+    if fmt in ('pdf', 'doc', 'docx'):
+        # Build a simple document containing questions and answers
+        try:
+            # Prepare textual content
+            content_items = []
+            for idx, c in enumerate(normalized, start=1):
+                q = f"{idx}. {c.get('question','') }"
+                content_items.append(q)
+                opts = c.get('options') or []
+                if opts:
+                    for oi, opt in enumerate(opts, start=1):
+                        content_items.append(f"   {chr(96+oi)}. {opt}")
+                ans = c.get('answer','')
+                if ans:
+                    content_items.append(f"   Answer: {ans}")
+                expl = c.get('explanation','')
+                if expl:
+                    content_items.append(f"   Explanation: {expl}")
+                content_items.append('')
+
+            if fmt == 'pdf':
+                # Use reportlab if available
+                if not REPORTLAB_AVAILABLE:
+                    # Fallback to plain text file
+                    bio = BytesIO('\n'.join(content_items).encode('utf-8'))
+                    bio.seek(0)
+                    return send_file(bio, mimetype='text/plain', as_attachment=True,
+                                     download_name=f'deck_{deck_id}.txt')
+
+                from reportlab.lib.pagesizes import letter
+                from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+                from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+                from reportlab.lib.units import inch
+
+                bio = BytesIO()
+                doc = SimpleDocTemplate(bio, pagesize=letter,
+                                        rightMargin=72, leftMargin=72,
+                                        topMargin=72, bottomMargin=18)
+                styles = getSampleStyleSheet()
+                normal = ParagraphStyle('Normal', parent=styles['Normal'], fontSize=11, leading=14)
+                story = []
+                for line in content_items:
+                    if not line.strip():
+                        story.append(Spacer(1, 0.14*inch))
+                        continue
+                    story.append(Paragraph(line.replace('\n','<br/>'), normal))
+                doc.build(story)
+                bio.seek(0)
+                return send_file(bio, mimetype='application/pdf', as_attachment=True,
+                                 download_name=f'deck_{deck_id}.pdf')
+
+            # DOCX
+            try:
+                from docx import Document
+                import io
+                docx_buf = io.BytesIO()
+                document = Document()
+                for line in content_items:
+                    if not line.strip():
+                        document.add_paragraph('')
+                    else:
+                        document.add_paragraph(line)
+                document.save(docx_buf)
+                docx_buf.seek(0)
+                return send_file(docx_buf, mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document', as_attachment=True,
+                                 download_name=f'deck_{deck_id}.docx')
+            except Exception:
+                # Fallback to text
+                bio = BytesIO('\n'.join(content_items).encode('utf-8'))
+                bio.seek(0)
+                return send_file(bio, mimetype='text/plain', as_attachment=True,
+                                 download_name=f'deck_{deck_id}.txt')
+
+        except Exception as e:
+            logger.error(f"Error exporting deck {deck_id}: {e}", exc_info=True)
+            return jsonify({'success': False, 'error': 'Export failed'}), 500
+
+    return jsonify({'success': False, 'error': 'Unsupported format'}), 400
 
 
 @app.route('/')

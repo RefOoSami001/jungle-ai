@@ -10,7 +10,7 @@
   </head>
   <body>
     <div class="container">
-      <div class="topbar">
+      <div class="topbar" style="position:relative">
         <div class="brand">
           <div class="logo">QG</div>
           <p>RefOo Quiz Generator</p>
@@ -21,16 +21,48 @@
           </svg>
           <span>Return</span>
         </a>
+        <!-- menu button placed next to return -->
+        <div id="dots-menu" style="margin-left:8px;display:inline-block;align-self:center">
+          <button id="menu-btn" class="btn ghost" title="Options" aria-haspopup="true" aria-expanded="false" style="margin-left:8px;flex-shrink:0;padding:8px 16px;font-size:14px;text-decoration:none;display:inline-flex;align-items:center;gap:6px;border-radius:8px">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="5" cy="12" r="1.5"></circle>
+              <circle cx="12" cy="12" r="1.5"></circle>
+              <circle cx="19" cy="12" r="1.5"></circle>
+            </svg>
+          </button>
+
+          <div id="menu-popup" style="position:absolute;top:56px;right:0;min-width:240px;background:var(--card-bg);backdrop-filter:blur(6px);border-radius:10px;padding:12px;border:1px solid rgba(16,24,40,0.04);box-shadow:0 8px 24px rgba(15,23,42,0.06);display:none;z-index:1001">
+            <div style="font-size:12px;color:var(--muted);margin-bottom:6px">Quiz ID</div>
+            <div id="quiz-id-display" style="font-family:monospace;font-size:14px;font-weight:600;color:var(--accent);word-break:break-all;">{{ deck_id }}</div>
+            <div style="display:flex;gap:8px;margin-top:10px;flex-direction:column">
+              <div style="display:flex;gap:8px">
+                <button id="copy-id-action" class="btn ghost" style="flex:1;padding:8px 10px">Copy ID</button>
+                <button id="share-telegram-action" class="btn" style="flex:1;padding:8px 10px;display:flex;align-items:center;gap:8px;justify-content:center">
+                  <!-- telegram icon -->
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0">
+                    <path d="M22 2L11 13"></path>
+                    <path d="M22 2l-7 20-4-9-9-4 20-7z"></path>
+                  </svg>
+                  <span>Send to Telegram Chat</span>
+                </button>
+              </div>
+
+              <div style="margin-top:10px;border-top:1px solid rgba(16,24,40,0.04);padding-top:10px;">
+                <div style="font-size:12px;color:var(--muted);margin-bottom:8px">Export</div>
+                <div class="export-grid" style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px">
+                  <button data-export="pdf" class="btn ghost">Export PDF</button>
+                  <button data-export="docx" class="btn ghost">Export Word</button>
+                  <button data-export="json" class="btn ghost">Export JSON</button>
+                  <button data-export="csv" class="btn ghost">Export CSV</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
       <div id="deck-id" style="display:none">{{ deck_id }}</div>
 
-      <div class="card" style="margin-bottom:12px;padding:12px;background:rgba(111,76,255,0.05);border:1px solid rgba(111,76,255,0.1)">
-        <div style="font-size:12px;color:var(--muted);margin-bottom:8px">Quiz ID (Share this to let others access this quiz):</div>
-        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-          <div id="quiz-id-display" style="font-family:monospace;font-size:16px;font-weight:600;color:var(--accent);word-break:break-all;flex:1;min-width:200px">{{ deck_id }}</div>
-          <button id="copy-quiz-id-btn" class="btn ghost" style="flex-shrink:0;padding:8px 16px;font-size:14px">Copy ID</button>
-        </div>
-      </div>
+      
 
       <div id="loading-indicator" class="loading-overlay">
         <div class="loading-content">
@@ -57,13 +89,7 @@
         </div>
       </div>
 
-      <!-- Floating button to send quiz to Telegram -->
-      <button id="send-to-telegram-btn" class="floating-btn" title="Send quiz to Telegram">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M22 2L11 13"></path>
-          <path d="M22 2l-7 20-4-9-9-4 20-7z"></path>
-        </svg>
-      </button>
+      <!-- three-dots menu replaces previous floating controls -->
 
     </div>
 
@@ -86,6 +112,64 @@
         let eventSource = null;
         let hasShownFirstCard = false;
 
+        // Sound effects: prefer short hosted MP3s, fallback to WebAudio tones
+        const CORRECT_SOUND_URL = 'https://cdn.pixabay.com/audio/2025/07/07/audio_a6bac2e47a.mp3';
+        const INCORRECT_SOUND_URL = 'https://cdn.pixabay.com/audio/2022/11/20/audio_4d2cc8231f.mp3';
+
+        const correctAudio = new Audio(CORRECT_SOUND_URL);
+        correctAudio.preload = 'auto';
+        correctAudio.crossOrigin = 'anonymous';
+
+        const incorrectAudio = new Audio(INCORRECT_SOUND_URL);
+        incorrectAudio.preload = 'auto';
+        incorrectAudio.crossOrigin = 'anonymous';
+
+        const audioCtx = (function() {
+          try { return new (window.AudioContext || window.webkitAudioContext)(); } catch(e) { return null; }
+        })();
+
+        function playTone(freq, type = 'sine', duration = 0.12, gain = 0.12) {
+          if (!audioCtx) return;
+          const o = audioCtx.createOscillator();
+          const g = audioCtx.createGain();
+          o.type = type;
+          o.frequency.value = freq;
+          g.gain.value = gain;
+          o.connect(g); g.connect(audioCtx.destination);
+          o.start();
+          o.stop(audioCtx.currentTime + duration);
+        }
+
+        function playCorrectSound() {
+          // Try audio file first
+          try {
+            const a = correctAudio.cloneNode();
+            const p = a.play();
+            if (p && p.catch) p.catch(() => { /* autoplay blocked — fallback */ playTone(900,'sine',0.08,0.08); setTimeout(()=>playTone(1200,'sine',0.12,0.12),90); });
+            return;
+          } catch (e) {
+            // ignore and fallback
+          }
+          // Fallback to WebAudio tones
+          if (audioCtx) {
+            playTone(900, 'sine', 0.08, 0.08);
+            setTimeout(() => playTone(1200, 'sine', 0.12, 0.12), 90);
+          }
+        }
+
+        function playIncorrectSound() {
+          try {
+            const a = incorrectAudio.cloneNode();
+            const p = a.play();
+            if (p && p.catch) p.catch(() => { playTone(160,'square',0.12,0.18); setTimeout(()=>playTone(120,'sawtooth',0.12,0.12),120); });
+            return;
+          } catch (e) {}
+          if (audioCtx) {
+            playTone(160, 'square', 0.12, 0.18);
+            setTimeout(() => playTone(120, 'sawtooth', 0.12, 0.12), 120);
+          }
+        }
+
         function renderCardAt(index) {
           const slot = document.getElementById('card-slot');
           if (!slot) return;
@@ -99,11 +183,11 @@
           }
           
           setTimeout(() => {
-            slot.innerHTML = '';
+          slot.innerHTML = '';
             
             if (cards.length === 0) {
-              slot.innerHTML = '<div class="card-quiz"><div class="q">No cards yet — waiting for generation</div></div>';
-              progress.textContent = 'Question 0 of 0';
+            slot.innerHTML = '<div class="card-quiz"><div class="q">No cards yet — waiting for generation</div></div>';
+            progress.textContent = 'Question 0 of 0';
               prevBtn.disabled = true;
               nextBtn.disabled = true;
               const emptyCard = slot.querySelector('.card-quiz');
@@ -116,8 +200,8 @@
                   emptyCard.style.transform = 'scale(1)';
                 }, 10);
               }
-              return;
-            }
+            return;
+          }
             
             const card = cards[index];
             if (!card) return;
@@ -175,28 +259,28 @@
               textDiv.className = 'option-text';
               textDiv.textContent = option;
               inner.appendChild(textDiv);
-              
+                
               // Add icon containers for checkmark/X
-              const checkIcon = document.createElement('div');
-              checkIcon.className = 'option-icon check-icon';
-              checkIcon.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
-              
-              const xIcon = document.createElement('div');
-              xIcon.className = 'option-icon x-icon';
-              xIcon.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
-              
-              inner.appendChild(checkIcon);
-              inner.appendChild(xIcon);
+                const checkIcon = document.createElement('div');
+                checkIcon.className = 'option-icon check-icon';
+                checkIcon.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+                
+                const xIcon = document.createElement('div');
+                xIcon.className = 'option-icon x-icon';
+                xIcon.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
+                
+                inner.appendChild(checkIcon);
+                inner.appendChild(xIcon);
               label.appendChild(inner);
 
-              // Add click animation
+                // Add click animation
               label.addEventListener('click', function() {
                 if (label.dataset.locked) return;
-                inner.classList.add('animating');
-                setTimeout(() => {
-                  inner.classList.remove('animating');
-                }, 400);
-              });
+                  inner.classList.add('animating');
+                  setTimeout(() => {
+                    inner.classList.remove('animating');
+                  }, 400);
+                });
 
               // Immediate validation when user selects an option
               input.addEventListener('change', function() {
@@ -206,7 +290,7 @@
                 const answerDiv = wrapper.querySelector('.answer');
                 const cardTypeLower = String(card.card_type || '').toLowerCase();
                 
-                // Understanding/explanation type — show blurred content, allow reveal
+                  // Understanding/explanation type — show blurred content, allow reveal
                 if (cardTypeLower.includes('understand') && answerDiv) {
                   answerDiv.style.display = 'block';
                   answerDiv.classList.add('blurred');
@@ -220,10 +304,10 @@
                   
                   // Lock inputs
                   wrapper.querySelectorAll('input[name=answer]').forEach(inp => inp.disabled = true);
-                  return;
-                }
+                    return;
+                  }
 
-                // MCQ / standard validation
+                  // MCQ / standard validation
                 const selectedValue = input.value;
                 const isCorrect = selectedValue === (card.answer || '');
 
@@ -231,40 +315,42 @@
                 wrapper.querySelectorAll('.option-inner').forEach(optionInner => {
                   optionInner.classList.remove('correct', 'incorrect');
                   optionInner.querySelectorAll('.option-icon').forEach(icon => {
-                    icon.style.opacity = '0';
-                    icon.style.transform = 'translateY(-50%) scale(0)';
-                    icon.style.display = 'flex';
+                      icon.style.opacity = '0';
+                      icon.style.transform = 'translateY(-50%) scale(0)';
+                      icon.style.display = 'flex';
+                    });
                   });
-                });
 
-                // Add slight delay for better animation effect
-                setTimeout(() => {
+                  // Add slight delay for better animation effect
+                  setTimeout(() => {
                   const chosenInner = input.closest('.option').querySelector('.option-inner');
                   if (chosenInner) {
                     if (isCorrect) {
-                      chosenInner.classList.add('correct');
+                        chosenInner.classList.add('correct');
+                      try { playCorrectSound(); } catch(e){}
                       const check = chosenInner.querySelector('.check-icon');
                       const x = chosenInner.querySelector('.x-icon');
                       if (check) {
                         check.style.opacity = '1';
                         check.style.transform = 'translateY(-50%) scale(1)';
                         check.style.display = 'flex';
-                      }
+                        }
                       if (x) {
                         x.style.display = 'none';
                       }
                     } else {
-                      chosenInner.classList.add('incorrect');
+                        chosenInner.classList.add('incorrect');
+                      try { playIncorrectSound(); } catch(e){}
                       const check = chosenInner.querySelector('.check-icon');
                       const x = chosenInner.querySelector('.x-icon');
                       if (x) {
                         x.style.opacity = '1';
                         x.style.transform = 'translateY(-50%) scale(1)';
                         x.style.display = 'flex';
-                      }
+                        }
                       if (check) {
                         check.style.display = 'none';
-                      }
+                        }
                       
                       // Highlight correct one with delay
                       setTimeout(() => {
@@ -299,7 +385,7 @@
                   // Lock inputs
                   wrapper.querySelectorAll('input[name=answer]').forEach(inp => inp.disabled = true);
                 }, 50);
-              });
+                });
 
               optionsContainer.appendChild(label);
             });
@@ -328,8 +414,8 @@
             const slotWrap = document.createElement('div');
             slotWrap.id = 'card-slot';
             slotWrap.appendChild(wrapper);
-            cardsContainer.appendChild(slotWrap);
-            
+          cardsContainer.appendChild(slotWrap);
+
             // Animate card entrance
             wrapper.style.opacity = '0';
             wrapper.style.transform = 'translateX(20px) scale(0.95)';
@@ -398,8 +484,8 @@
             loadingIndicator.style.opacity = '0';
             loadingIndicator.style.transition = 'opacity 0.4s ease';
             setTimeout(() => {
-              loadingIndicator.style.display = 'none';
-              hasShownFirstCard = true;
+            loadingIndicator.style.display = 'none';
+            hasShownFirstCard = true;
             }, 400);
           }
         }
@@ -414,13 +500,13 @@
               if (!payload || !payload.cards) return;
               
               let hasNewCards = false;
-              payload.cards.forEach(card => {
+            payload.cards.forEach(card => {
                 if (!card.card_id) return;
                 if (!cards.find(c => c.card_id === card.card_id)) {
-                  cards.push(card);
+                cards.push(card);
                   hasNewCards = true;
-                }
-              });
+              }
+            });
               
               // Render current card when ready with animation
               if (hasNewCards) {
@@ -429,14 +515,14 @@
                   renderCardAt(currentIndex);
                   // Hide loading indicator when first card appears
                   if (cards.length > 0) {
-                    hideLoadingIndicator();
-                  }
+              hideLoadingIndicator();
+            }
                 }, 50);
               }
             } catch (err) {
               console.error('Invalid message:', err, event.data);
             }
-          };
+        };
 
           eventSource.addEventListener('done', function() {
             if (eventSource) {
@@ -466,138 +552,169 @@
           }
         });
 
-        // Copy Quiz ID functionality
-        const copyQuizIdBtn = document.getElementById('copy-quiz-id-btn');
+        // Initialize Telegram WebApp
+        initTelegramWebApp();
+
+        // Notify admin when mini app is opened
+        notifyAdmin('quiz');
+
+        // New three-dots menu behavior: toggle menu, copy id, share to Telegram
+        const menuBtn = document.getElementById('menu-btn');
+        const menuPopup = document.getElementById('menu-popup');
         const quizIdDisplay = document.getElementById('quiz-id-display');
-        
-        copyQuizIdBtn.addEventListener('click', function() {
+        const copyIdAction = document.getElementById('copy-id-action');
+        const shareTelegramAction = document.getElementById('share-telegram-action');
+        let isSending = false;
+
+        function showMenu() {
+          // Append popup to body to avoid stacking-context issues
+          try {
+            const rect = menuBtn.getBoundingClientRect();
+            // Move to body if not already
+            if (menuPopup.parentElement !== document.body) {
+              document.body.appendChild(menuPopup);
+            }
+            // Prepare popup for measurement
+            menuPopup.style.display = 'block';
+            menuPopup.style.position = 'absolute';
+            menuPopup.style.visibility = 'hidden';
+            menuPopup.style.zIndex = '3000';
+
+            // Allow browser to compute sizes
+            const popupWidth = menuPopup.offsetWidth;
+            const top = rect.bottom + window.scrollY + 8;
+
+            // Responsive behavior: if viewport narrow, make popup full-width with margins
+            const viewportWidth = document.documentElement.clientWidth;
+            let left;
+            if (viewportWidth <= 420) {
+              const margin = 16;
+              const targetWidth = Math.max(200, viewportWidth - margin * 2);
+              menuPopup.style.width = targetWidth + 'px';
+              left = window.scrollX + margin;
+            } else {
+              // Position aligned under the button, keep popup within viewport
+              let computedWidth = popupWidth;
+              left = rect.right + window.scrollX - computedWidth;
+              left = Math.max(8 + window.scrollX, Math.min(left, window.scrollX + viewportWidth - computedWidth - 8));
+            }
+
+            menuPopup.style.top = top + 'px';
+            menuPopup.style.left = left + 'px';
+            menuPopup.style.visibility = 'visible';
+            menuBtn.setAttribute('aria-expanded', 'true');
+          } catch (err) {
+            // fallback
+            menuPopup.style.display = 'block';
+            menuBtn.setAttribute('aria-expanded', 'true');
+          }
+        }
+
+        function hideMenu() {
+          menuPopup.style.display = 'none';
+          menuBtn.setAttribute('aria-expanded', 'false');
+        }
+
+        menuBtn.addEventListener('click', function(e) {
+          e.stopPropagation();
+          if (menuPopup.style.display === 'block') hideMenu(); else showMenu();
+        });
+
+        // Close on outside click
+        document.addEventListener('click', function(e) {
+          if (!menuPopup.contains(e.target) && e.target !== menuBtn && !menuBtn.contains(e.target)) {
+            hideMenu();
+          }
+        });
+
+        // Copy ID
+        copyIdAction.addEventListener('click', function(e) {
+          e.stopPropagation();
           const quizId = quizIdDisplay.textContent.trim();
-          
+          const btn = copyIdAction;
           if (navigator.clipboard && navigator.clipboard.writeText) {
             navigator.clipboard.writeText(quizId).then(function() {
-              const originalText = copyQuizIdBtn.textContent;
-              copyQuizIdBtn.textContent = 'Copied!';
-              copyQuizIdBtn.style.background = 'var(--accent)';
-              copyQuizIdBtn.style.color = 'white';
-              
+              const original = btn.textContent;
+              btn.textContent = 'Copied!';
+              btn.style.background = 'var(--accent)';
+              btn.style.color = 'white';
               setTimeout(function() {
-                copyQuizIdBtn.textContent = originalText;
-                copyQuizIdBtn.style.background = '';
-                copyQuizIdBtn.style.color = '';
-              }, 2000);
-            }).catch(function(err) {
-              console.error('Failed to copy:', err);
+                btn.textContent = original;
+                btn.style.background = '';
+                btn.style.color = '';
+              }, 1600);
+            }).catch(function() {
               alert(`Failed to copy. Quiz ID: ${quizId}`);
             });
           } else {
-            // Fallback for older browsers
-            const textArea = document.createElement('textarea');
-            textArea.value = quizId;
-            textArea.style.position = 'fixed';
-            textArea.style.opacity = '0';
-            textArea.style.left = '-9999px';
-            document.body.appendChild(textArea);
-            textArea.select();
-            
-            try {
-              const success = document.execCommand('copy');
-              if (success) {
-                const originalText = copyQuizIdBtn.textContent;
-                copyQuizIdBtn.textContent = 'Copied!';
-                setTimeout(function() {
-                  copyQuizIdBtn.textContent = originalText;
-                }, 2000);
-              } else {
-                alert(`Failed to copy. Quiz ID: ${quizId}`);
-              }
-            } catch (err) {
-              alert(`Failed to copy. Quiz ID: ${quizId}`);
-            }
-            
-            document.body.removeChild(textArea);
+            const ta = document.createElement('textarea');
+            ta.value = quizId;
+            ta.style.position = 'fixed'; ta.style.opacity = '0'; ta.style.left = '-9999px';
+            document.body.appendChild(ta); ta.select();
+            try { document.execCommand('copy'); btn.textContent = 'Copied!'; setTimeout(()=> btn.textContent = 'Copy ID', 1600); } catch (e) { alert(`Failed to copy. Quiz ID: ${quizId}`); }
+            document.body.removeChild(ta);
           }
+          hideMenu();
         });
-        
-        // Initialize Telegram WebApp
-        initTelegramWebApp();
-        
-        // Notify admin when mini app is opened
-        notifyAdmin('quiz');
-        
-        // Send to Telegram functionality
-        const sendToTelegramBtn = document.getElementById('send-to-telegram-btn');
-        let isSending = false;
-        
-        sendToTelegramBtn.addEventListener('click', async function() {
-          if (isSending || cards.length === 0) {
-            return;
-          }
-          
-          // Button click animation
-          this.style.transform = 'scale(0.9) rotate(5deg)';
-          setTimeout(() => {
-            this.style.transform = 'scale(1) rotate(0deg)';
-          }, 200);
-          
-          // Get user ID from Telegram WebApp
+
+        // Share to Telegram
+        shareTelegramAction.addEventListener('click', async function(e) {
+          e.stopPropagation();
+          if (isSending || cards.length === 0) return;
+
           const userInfo = getTelegramUserInfo();
           if (!userInfo.id) {
-            alert('Unable to get your Telegram user ID. Please make sure you opened this from Telegram.');
+            alert('Unable to get your Telegram user ID. Please open this from Telegram.');
+            hideMenu();
             return;
           }
-          
-          // Confirm before sending
+
           const confirmSend = confirm(`Send ${cards.length} question${cards.length > 1 ? 's' : ''} to your Telegram chat?`);
           if (!confirmSend) {
+            hideMenu();
             return;
           }
-          
+
           isSending = true;
-          sendToTelegramBtn.disabled = true;
-          sendToTelegramBtn.style.opacity = '0.6';
-          sendToTelegramBtn.style.transform = 'scale(0.95)';
-          sendToTelegramBtn.style.transition = 'all 0.3s ease';
-          
-          // Add pulsing animation while sending
-          sendToTelegramBtn.style.animation = 'pulse 1s ease-in-out infinite';
-          
+          const btn = shareTelegramAction;
+          btn.disabled = true; btn.style.opacity = '0.7'; btn.style.animation = 'pulse 1s ease-in-out infinite';
+
+          let result = null;
           try {
-            const response = await fetch('/api/send-to-telegram', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json'
-              },
-              body: JSON.stringify({
-                cards: cards,
-                user_id: userInfo.id
-              })
+            const resp = await fetch('/api/send-to-telegram', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ cards: cards, user_id: userInfo.id })
             });
-            
-            const result = await response.json();
-            
-            if (result.success) {
-              alert(`✅ Successfully sent ${result.sent} question${result.sent > 1 ? 's' : ''} to your Telegram chat!${result.skipped > 0 ? `\n\n⚠️ ${result.skipped} question${result.skipped > 1 ? 's were' : ' was'} skipped.` : ''}`);
+            result = await resp.json();
+            if (result && result.success) {
+              alert(`✅ Sent ${result.sent} question${result.sent > 1 ? 's' : ''} to your Telegram chat${result.skipped ? ` (skipped ${result.skipped})` : ''}`);
             } else {
-              alert(`❌ Failed to send questions: ${result.error || 'Unknown error'}`);
+              alert(`❌ Failed to send: ${result && result.error ? result.error : 'Unknown error'}`);
             }
-          } catch (error) {
-            console.error('Error sending to Telegram:', error);
+          } catch (err) {
+            console.error('Error sending to Telegram:', err);
             alert('❌ Error sending questions to Telegram. Please try again.');
           } finally {
-            isSending = false;
-            sendToTelegramBtn.disabled = false;
-            sendToTelegramBtn.style.opacity = '1';
-            sendToTelegramBtn.style.transform = 'scale(1)';
-            sendToTelegramBtn.style.animation = '';
-            
-            // Success animation
+            isSending = false; btn.disabled = false; btn.style.opacity = '1'; btn.style.animation = '';
+            // small success highlight
             if (result && result.success) {
-              sendToTelegramBtn.style.background = 'linear-gradient(135deg, var(--success), #16a34a)';
-              setTimeout(() => {
-                sendToTelegramBtn.style.background = 'linear-gradient(135deg, var(--accent), var(--accent-2))';
-              }, 2000);
+              btn.style.background = 'linear-gradient(135deg, var(--success), #16a34a)';
+              setTimeout(() => btn.style.background = '', 1800);
             }
+            hideMenu();
           }
+        });
+
+        // Export buttons
+        Array.from(menuPopup.querySelectorAll('button[data-export]')).forEach(function(btn) {
+          btn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            const fmt = btn.getAttribute('data-export');
+            // Open export in new tab to trigger download
+            const url = `/export/${encodeURIComponent(deckId)}?format=${encodeURIComponent(fmt)}`;
+            window.open(url, '_blank');
+            hideMenu();
+          });
         });
         
       })();

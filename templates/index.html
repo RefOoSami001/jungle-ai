@@ -22,14 +22,25 @@
         <div class="card" style="border-left:4px solid var(--danger);margin-bottom:12px">{{ error }}</div>
       {% endif %}
 
-      <div class="card" style="margin-bottom:16px">
-        <h3 style="margin:0 0 12px 0;font-size:18px;font-weight:600">Load Existing Quiz</h3>
-        <form method="get" action="/" style="display:flex;gap:8px;align-items:flex-end">
-          <div style="flex:1">
-            <input type="text" name="quiz_id" id="quiz-id-input" class="input" placeholder="Enter Quiz ID,e.g., eK6fVwO4KTa7c..." style="margin-top:8px">
+      <div class="card" style="margin-bottom:16px;display:flex;gap:14px;align-items:center">
+        <div style="display:flex;align-items:center;gap:12px;flex:1">
+          <div style="width:56px;height:56px;border-radius:12px;background:linear-gradient(135deg,var(--accent),var(--accent-2));display:flex;align-items:center;justify-content:center;flex-shrink:0">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="17 8 12 3 7 8"></polyline>
+              <line x1="12" y1="3" x2="12" y2="15"></line>
+            </svg>
           </div>
-          <button type="submit" class="btn" style="flex-shrink:0;padding:10px 20px">Load Quiz</button>
-        </form>
+          <div style="flex:1">
+            <div style="font-size:14px;font-weight:700;margin-bottom:6px">Load Existing Quiz</div>
+            <div style="display:flex;gap:8px;align-items:center">
+              <input type="text" name="quiz_id" id="quiz-id-input" class="input" placeholder="Enter Quiz ID (e.g., eK6fVwO4KTa7c...)" style="margin-top:0">
+              <button type="submit" class="btn" form="load-quiz-form" style="flex-shrink:0;padding:10px 14px">Load</button>
+            </div>
+            <div style="margin-top:6px;font-size:13px;color:var(--muted)">Paste a quiz ID to quickly open a generated quiz.</div>
+          </div>
+        </div>
+        <form id="load-quiz-form" method="get" action="/" style="display:none"></form>
       </div>
 
       <div class="card">
@@ -43,7 +54,7 @@
               </div>
               
               <div id="file-input-section">
-                <label class="small">Upload file (PDF or Word):</label>
+              <label class="small">Upload file (PDF or Word):</label>
               <div id="file-upload-area" class="file-upload-area">
                 <input type="file" name="file" id="file-input" accept=".pdf,.doc,.docx" style="display:none">
                 <div id="file-upload-content" class="file-upload-content">
@@ -175,7 +186,7 @@
         
         let maxPages = null;
         let isPDF = false;
-        
+
         // Handle input method toggle with smooth animations
         inputMethodRadios.forEach(radio => {
           radio.addEventListener('change', function() {
@@ -204,9 +215,9 @@
                 textInputSection.style.display = 'block';
                 textInputSection.style.opacity = '0';
                 textInputSection.style.transform = 'translateY(10px)';
-                fileInput.value = '';
-                fileUploadContent.style.display = 'flex';
-                fileSelectedContent.style.display = 'none';
+          fileInput.value = '';
+          fileUploadContent.style.display = 'flex';
+          fileSelectedContent.style.display = 'none';
                 pageRangeContainer.style.display = 'none';
                 setTimeout(() => {
                   textInputSection.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
@@ -255,8 +266,8 @@
             fileUploadContent.style.display = 'flex';
             fileUploadContent.style.opacity = '0';
             fileUploadContent.style.transform = 'scale(0.9)';
-            pageRangeContainer.style.display = 'none';
-            maxPages = null;
+          pageRangeContainer.style.display = 'none';
+          maxPages = null;
             pageStart.value = '';
             pageEnd.value = '';
             pageRangeError.style.display = 'none';
@@ -301,8 +312,8 @@
           const file = fileInput.files[0];
           if (!file) return;
           
-          fileName.textContent = file.name;
-          fileSize.textContent = formatFileSize(file.size);
+            fileName.textContent = file.name;
+            fileSize.textContent = formatFileSize(file.size);
           
           // Animate file selection
           fileUploadContent.style.opacity = '0';
@@ -322,7 +333,7 @@
           const fileNameLower = file.name.toLowerCase();
           isPDF = fileNameLower.endsWith('.pdf');
           const isWord = fileNameLower.endsWith('.doc') || fileNameLower.endsWith('.docx');
-          
+            
             if (isPDF || isWord) {
               pageRangeContainer.style.display = 'block';
               pageRangeContainer.style.opacity = '0';
@@ -333,36 +344,36 @@
                 pageRangeContainer.style.opacity = '1';
                 pageRangeContainer.style.transform = 'translateY(0)';
               }, 10);
-            
+              
             if (isPDF) {
-              // Try to get page count from PDF
+                // Try to get page count from PDF
               getPDFPageCount(file, function(pageCount) {
                 if (pageCount) {
-                  maxPages = pageCount;
+                    maxPages = pageCount;
                   totalPages.textContent = `(Max: ${pageCount} pages)`;
-                  pageStart.setAttribute('max', pageCount);
-                  pageEnd.setAttribute('max', pageCount);
-                  validatePageRange();
-                } else {
-                  totalPages.textContent = '(Page count will be determined after upload)';
-                }
-              });
+                    pageStart.setAttribute('max', pageCount);
+                    pageEnd.setAttribute('max', pageCount);
+                    validatePageRange();
+                  } else {
+                    totalPages.textContent = '(Page count will be determined after upload)';
+                  }
+                });
+              } else {
+                totalPages.textContent = '';
+                pageStart.removeAttribute('max');
+                pageEnd.removeAttribute('max');
+              }
+              
+              pageStart.value = '';
+              pageEnd.value = '';
+              pageRangeError.style.display = 'none';
             } else {
-              totalPages.textContent = '';
-              pageStart.removeAttribute('max');
-              pageEnd.removeAttribute('max');
-            }
-            
-            pageStart.value = '';
-            pageEnd.value = '';
-            pageRangeError.style.display = 'none';
-          } else {
             pageRangeContainer.style.opacity = '0';
             pageRangeContainer.style.transform = 'translateY(-10px)';
             setTimeout(() => {
               pageRangeContainer.style.display = 'none';
             }, 300);
-            maxPages = null;
+              maxPages = null;
           }
         }
 
@@ -455,18 +466,18 @@
           
           if (selectedMethod === 'file') {
             if (!fileInput.files || fileInput.files.length === 0) {
-              e.preventDefault();
-              alert('Please select a file to upload');
-              return false;
-            }
-            
-            // Validate page range if visible
+            e.preventDefault();
+            alert('Please select a file to upload');
+            return false;
+          }
+          
+          // Validate page range if visible
             if (pageRangeContainer.style.display !== 'none') {
               if (!validatePageRange()) {
-                e.preventDefault();
-                return false;
-              }
+              e.preventDefault();
+              return false;
             }
+          }
           } else {
             // Text input method
             const textValue = textContent.value.trim();

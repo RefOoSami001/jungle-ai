@@ -727,7 +727,7 @@ label.small {
 @keyframes pulse {
   0%, 100% {
     box-shadow: 0 0 0 0 rgba(111, 76, 255, 0.4);
-  }
+}
   50% {
     box-shadow: 0 0 0 10px rgba(111, 76, 255, 0);
   }
@@ -797,6 +797,49 @@ label.small {
   box-shadow: 0 8px 24px rgba(111, 76, 255, 0.6);
   animation: float 1.5s ease-in-out infinite;
 }
+
+/* Three-dots menu popup (compact mobile-friendly actions) */
+/* Menu popup adjustments */
+#menu-popup button { border-radius:8px }
+#menu-popup .btn { padding:8px 10px; font-size:14px }
+#menu-popup #quiz-id-display { max-height:72px; overflow:auto }
+
+/* When placed in topbar, popup should align under the button */
+@media (max-width:480px){
+  #menu-popup{right:12px;left:12px;top:64px}
+}
+/* Ensure menu popup appears above overlays */
+#menu-popup{z-index:3000 !important}
+
+/* Constrain popup width and make responsive */
+#menu-popup{
+  box-sizing: border-box;
+  max-width: 360px;
+  width: auto;
+  padding: 12px;
+  border-radius: 10px;
+}
+
+@media (max-width:420px){
+  /* On very small screens let JS set full-width with margins; add gentle padding */
+  #menu-popup{
+    max-width: calc(100vw - 32px);
+    left: 16px !important;
+    right: 16px !important;
+    width: calc(100vw - 32px) !important;
+  }
+}
+/* Export button visuals */
+.export-grid .btn {
+  padding:8px 10px;
+  font-size:13px;
+  text-align:center;
+}
+
+#menu-popup { box-shadow: 0 12px 32px rgba(15,23,42,0.12); border: 1px solid rgba(16,24,40,0.06); }
+
+/* Slightly bolder heading inside popup */
+#menu-popup .muted-heading { font-weight:600; margin-bottom:6px; color:var(--muted) }
 
 .floating-btn:active {
   transform: scale(0.9);
