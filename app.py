@@ -405,10 +405,14 @@ def fetch_cards_from_api(deck_id: str, user_id: str, timeout: int = None) -> Tup
         timeout = config.REQUEST_TIMEOUT
     
     try:
+        json_data = {
+            'user_id': user_id,
+            'deck_id': deck_id,
+        }
         response = session.post(
-            f'{config.CARDS_ENDPOINT}/{deck_id}',
+            f'https://apiv1.jungleai.com/cards/get_all_cards_data_for_deck_and_subdecks',
             headers=config.HEADERS,
-            json={'user_id': user_id},
+            json=json_data,
             timeout=timeout,
         )
         response.raise_for_status()
