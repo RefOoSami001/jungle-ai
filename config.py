@@ -19,7 +19,7 @@ CARDS_ENDPOINT = f'{API_BASE_URL}/cards/get_all_cards_data_for_deck_and_subdecks
 UPLOAD_URL_ENDPOINT = f'{API_BASE_URL}/file_or_url/generate_url_for_file_upload_to_s3'
 
 # Default User ID
-DEFAULT_USER_ID = os.environ.get('DEFAULT_USER_ID', 'C3Y1MTPQvBOzybZzAvQ2YH1rNQE2')
+DEFAULT_USER_ID = os.environ.get('DEFAULT_USER_ID', 'MM0eYlGpZJTYMCLaKAvi5ztgVfx2')
 
 # HTTP Headers
 HEADERS: Dict[str, str] = {
@@ -54,3 +54,4 @@ STREAM_MAX_IDLE = 30
 REQUEST_TIMEOUT = 30
 UPLOAD_TIMEOUT = 60
 STREAM_TIMEOUT = 20
+
