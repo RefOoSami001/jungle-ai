@@ -23,7 +23,9 @@ def get_content_type(filename: str) -> str:
 def build_question_types(selected_types: List[str], difficulty: str = 'Advanced') -> List[Dict[str, str]]:
     """Build question types list for API request.
     
-    Note: True/False Question always uses Basic difficulty regardless of the selected difficulty.
+    Note: 
+    - True/False Question always uses Basic difficulty regardless of the selected difficulty.
+    - Case Scenario Multiple Choice Question always uses Advanced difficulty regardless of the selected difficulty.
     """
     question_types = []
     for question_type in selected_types:
@@ -35,6 +37,12 @@ def build_question_types(selected_types: List[str], difficulty: str = 'Advanced'
             question_types.append({
                 'cardType': config.QUESTION_TYPE_MAPPING[question_type],
                 'difficultyGroup': 'Basic'
+            })
+        # Case Scenario Multiple Choice Question always uses Advanced difficulty
+        elif question_type == 'Case Scenario Multiple Choice Question':
+            question_types.append({
+                'cardType': config.QUESTION_TYPE_MAPPING[question_type],
+                'difficultyGroup': 'Advanced'
             })
         else:
             question_types.append({
