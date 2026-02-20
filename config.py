@@ -13,10 +13,13 @@ UPLOAD_FOLDER = 'uploads'
 ALLOWED_EXTENSIONS = {'pdf', 'doc', 'docx'}
 
 # API Configuration
+# Primary backend host (keeps generation and task endpoints working)
 API_BASE_URL = 'https://cbackend.jungleai.com'
 GENERATE_ENDPOINT = f'{API_BASE_URL}/generate_content/run_all_generations_for_file_or_url'
 CARDS_ENDPOINT = f'{API_BASE_URL}/cards/get_all_cards_data_for_deck_and_subdecks'
-UPLOAD_URL_ENDPOINT = f'{API_BASE_URL}/file_or_url/generate_url_for_file_upload_to_s3'
+# The presigned upload URL endpoint is served from the public API host
+# (apiv1) so target it explicitly to avoid 404s.
+UPLOAD_URL_ENDPOINT = 'https://apiv1.jungleai.com/file_or_url/generate_url_for_file_upload_to_s3'
 
 # Default User ID
 DEFAULT_USER_ID = os.environ.get('DEFAULT_USER_ID', 'MM0eYlGpZJTYMCLaKAvi5ztgVfx2')
